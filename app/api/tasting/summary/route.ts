@@ -1,96 +1,134 @@
 import { NextResponse } from "next/server";
 import { db } from "../../../../lib/firebaseAdmin";
+import { hashPin } from "../../../../lib/security";
 
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const slug = String(searchParams.get("slug") ?? "").trim();
+type RatingDoc = {
+  blindNumber: number;
+  scores: Record<string, number>; // { "Nase": 7, "Gaumen": 8, ... }
+  createdAt?: any;
+};
 
-  if (!slug) return NextResponse.json({ error: "Missing slug" }, { status: 400 });
+function bad(msg: string, status = 400) {
+  return NextResponse.json({ error: msg }, { status });
+}
 
-  const tastingQ = await db()
-    .collection("tastings")
-    .where("publicSlug", "==", slug)
-    .limit(1)
-    .get();
-
-  if (tastingQ.empty) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
-  const tastingDoc = tastingQ.docs[0];
-  const tastingId = tastingDoc.id;
-  const t = tastingDoc.data() as any;
-
-  if (t.status !== "revealed") {
-    return NextResponse.json({ error: "Summary available after reveal" }, { status: 403 });
+export async function POST(req: Request) {
+  let body: any = {};
+  try {
+    body = await req.json().catch(() => ({}));
+  } catch {
+    body = {};
   }
 
-  const [criteriaSnap, winesSnap, ratingsSnap] = await Promise.all([
-    db().collection("tastings").doc(tastingId).collection("criteria").orderBy("order", "asc").get(),
-    db().collection("tastings").doc(tastingId).collection("wines").orderBy("blindNumber", "asc").get(),
-    db().collection("tastings").doc(tastingId).collection("ratings").get(),
-  ]);
+  const publicSlug = String(body.publicSlug ?? "").trim();
+  const pin = String(body.pin ?? "").trim();
 
-  const criteria = criteriaSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-  const wines = winesSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-  const ratings = ratingsSnap.docs.map((d) => d.data() as any);
+  if (!publicSlug) return bad("publicSlug missing");
+  if (!/^\d{4}$/.test(pin)) return bad("pin must be 4 digits");
 
-  const byWine: Record<string, any> = {};
-  for (const w of wines) {
-    byWine[w.id] = {
-      wineId: w.id,
-      blindNumber: w.blindNumber,
-      displayName: w.displayName ?? null,
-      winery: w.winery ?? null,
-      grape: w.grape ?? null,
-      vintage: w.vintage ?? null,
-      count: 0,
-      sumTotal: 0,
-      sumByCriterion: Object.fromEntries(criteria.map((c) => [c.id, 0])),
-      avgTotal: null as number | null,
-      avgByCriterion: {} as Record<string, number | null>,
-    };
-  }
+  try {
+    // 1) Tasting laden
+    const q = await db()
+      .collection("tastings")
+      .where("publicSlug", "==", publicSlug)
+      .limit(1)
+      .get();
 
-  for (const r of ratings) {
-    const agg = byWine[r.wineId];
-    if (!agg) continue;
+    if (q.empty) return bad("Tasting not found", 404);
 
-    agg.count += 1;
+    const tDoc = q.docs[0];
+    const tasting = tDoc.data() as any;
 
-    let n = 0;
-    let total = 0;
-    for (const c of criteria) {
-      const v = Number(r.scores?.[c.id]);
-      if (!Number.isFinite(v)) continue;
-      agg.sumByCriterion[c.id] += v;
-      total += v;
-      n += 1;
+    // 2) PIN prüfen
+    const expectedHash = String(tasting.pinHash ?? "");
+    const providedHash = hashPin(pin);
+
+    if (!expectedHash || providedHash !== expectedHash) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    if (n > 0) agg.sumTotal += total / n;
-  }
 
-  const rows = Object.values(byWine).map((a: any) => {
-    if (a.count > 0) {
-      a.avgTotal = Number((a.sumTotal / a.count).toFixed(2));
-      for (const c of criteria) {
-        a.avgByCriterion[c.id] = Number((a.sumByCriterion[c.id] / a.count).toFixed(2));
+    // 3) Wines laden (für Reihenfolge)
+    const winesSnap = await tDoc.ref.collection("wines").get();
+    const wines = winesSnap.docs
+      .map((d) => d.data() as any)
+      .filter((w) => Number.isFinite(w.blindNumber))
+      .sort((a, b) => Number(a.blindNumber) - Number(b.blindNumber));
+
+    // 4) Ratings laden
+    // Erwartete Struktur: tastings/{tId}/ratings/{doc}
+    // doc: { blindNumber: number, scores: { [label]: number } }
+    const ratingsSnap = await tDoc.ref.collection("ratings").get();
+    const ratings: RatingDoc[] = ratingsSnap.docs
+      .map((d) => d.data() as any)
+      .filter((r) => Number.isFinite(r.blindNumber) && r.scores && typeof r.scores === "object");
+
+    // 5) Aggregation
+    // Map blindNumber -> criterionLabel -> { sum, n }
+    const agg: Record<number, Record<string, { sum: number; n: number }>> = {};
+
+    for (const r of ratings) {
+      const bn = Number(r.blindNumber);
+      agg[bn] ||= {};
+
+      for (const [label, value] of Object.entries(r.scores || {})) {
+        const v = Number(value);
+        if (!Number.isFinite(v)) continue;
+
+        agg[bn][label] ||= { sum: 0, n: 0 };
+        agg[bn][label].sum += v;
+        agg[bn][label].n += 1;
       }
-    } else {
-      a.avgTotal = null;
-      for (const c of criteria) a.avgByCriterion[c.id] = null;
     }
-    return a;
-  });
 
-  rows.sort((x: any, y: any) => {
-    if (x.avgTotal == null && y.avgTotal == null) return x.blindNumber - y.blindNumber;
-    if (x.avgTotal == null) return 1;
-    if (y.avgTotal == null) return -1;
-    return y.avgTotal - x.avgTotal;
-  });
+    // 6) Build summary rows
+    const rows = wines.map((w: any) => {
+      const bn = Number(w.blindNumber);
+      const byCrit = agg[bn] || {};
+      const criteria = Object.entries(byCrit).reduce((acc, [label, s]) => {
+        acc[label] = s.n ? Number((s.sum / s.n).toFixed(2)) : null;
+        return acc;
+      }, {} as Record<string, number | null>);
 
-  return NextResponse.json({
-    tasting: { id: tastingId, title: t.title, hostName: t.hostName, publicSlug: t.publicSlug, status: t.status },
-    criteria,
-    ranking: rows,
-  });
+      // Gesamt = Ø über vorhandene Kriterien
+      const vals = Object.values(criteria).filter((x): x is number => typeof x === "number");
+      const total = vals.length ? Number((vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2)) : null;
+
+      return {
+        blindNumber: bn,
+        criteria,
+        total,
+      };
+    });
+
+    // 7) Ranking
+    const ranking = [...rows]
+      .filter((r) => typeof r.total === "number")
+      .sort((a, b) => (b.total as number) - (a.total as number))
+      .map((r, idx) => ({
+        rank: idx + 1,
+        blindNumber: r.blindNumber,
+        total: r.total,
+      }));
+
+    return NextResponse.json({
+      ok: true,
+      publicSlug,
+      status: tasting.status ?? null,
+      counts: {
+        wines: wines.length,
+        ratings: ratings.length,
+      },
+      rows,
+      ranking,
+      note:
+        ratings.length === 0
+          ? "No ratings found. Expected Firestore path: tastings/{tastingId}/ratings with fields {blindNumber, scores:{...}}"
+          : null,
+    });
+  } catch (e: any) {
+    return NextResponse.json(
+      { error: e?.message ?? "Summary failed" },
+      { status: 500 }
+    );
+  }
 }
