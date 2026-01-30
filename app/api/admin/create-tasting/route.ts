@@ -5,46 +5,71 @@ import { hashPin } from "../../../../lib/security";
 
 type CriterionInput = { label: string; scaleMin: number; scaleMax: number };
 
-function getAdminSecret(req: Request, body: any): string {
-  // 1) Header (empfohlen)
-  const h =
+function pickProvidedSecret(req: Request, body: any): { value: string; source: string } {
+  const header =
     req.headers.get("x-admin-secret") ||
     req.headers.get("X-Admin-Secret") ||
-    req.headers.get("x-admin_secret") ||
-    req.headers.get("x-adminsecret") ||
     "";
 
-  if (h && h.trim()) return h.trim();
+  if (header && header.trim()) return { value: header.trim(), source: "header:x-admin-secret" };
 
-  // 2) Authorization: Bearer <secret>
   const auth = req.headers.get("authorization") || "";
   if (auth.toLowerCase().startsWith("bearer ")) {
     const token = auth.slice(7).trim();
-    if (token) return token;
+    if (token) return { value: token, source: "header:authorization(bearer)" };
   }
 
-  // 3) Body-Felder (falls UI es dort mitschickt)
-  const b =
+  const fromBody =
     body?.adminSecret ??
     body?.ADMIN_SECRET ??
     body?.admin_secret ??
     body?.secret ??
     "";
 
-  return String(b).trim();
+  const v = String(fromBody ?? "").trim();
+  if (v) return { value: v, source: "body" };
+
+  return { value: "", source: "none" };
 }
 
 export async function POST(req: Request) {
+  let body: any = {};
   try {
-    const body = await req.json().catch(() => ({}));
+    body = await req.json().catch(() => ({}));
+  } catch {
+    body = {};
+  }
 
-    const provided = getAdminSecret(req, body);
-    const expected = (process.env.ADMIN_SECRET ?? "").trim();
+  const expected = String(process.env.ADMIN_SECRET ?? "").trim();
+  const provided = pickProvidedSecret(req, body);
 
-    if (!expected || !provided || provided !== expected) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+  // WICHTIG: Wenn expected leer ist, ist es ein ENV-Problem (kein Forbidden)
+  if (!expected) {
+    return NextResponse.json(
+      { error: "ADMIN_SECRET is not set in this deployment (Vercel env var missing or not applied)." },
+      { status: 500 }
+    );
+  }
 
+  if (!provided.value || provided.value !== expected) {
+    return NextResponse.json(
+      {
+        error: "Forbidden",
+        debug: {
+          expectedSet: true,
+          providedSource: provided.source,
+          providedLength: provided.value.length,
+          hint:
+            provided.source === "none"
+              ? "UI did not send the secret (header/body empty)."
+              : "Secret was sent but does not match Vercel ADMIN_SECRET for this deployment.",
+        },
+      },
+      { status: 403 }
+    );
+  }
+
+  try {
     const publicSlug = String(body.publicSlug ?? "").trim();
     const title = String(body.title ?? "").trim();
     const hostName = String(body.hostName ?? "").trim();
@@ -57,17 +82,7 @@ export async function POST(req: Request) {
     if (!publicSlug || !title || !hostName || !/^\d{4}$/.test(pin)) {
       return NextResponse.json({ error: "Invalid input" }, { status: 400 });
     }
-    if (!Number.isInteger(wineCount) || wineCount < 1 || wineCount > 10) {
-      return NextResponse.json({ error: "Invalid wineCount" }, { status: 400 });
-    }
-    if (!Number.isInteger(maxParticipants) || maxParticipants < 1 || maxParticipants > 10) {
-      return NextResponse.json({ error: "Invalid maxParticipants" }, { status: 400 });
-    }
-    if (!Array.isArray(criteria) || criteria.length < 1 || criteria.length > 8) {
-      return NextResponse.json({ error: "Invalid criteria" }, { status: 400 });
-    }
 
-    // Slug uniqueness check
     const existing = await db()
       .collection("tastings")
       .where("publicSlug", "==", publicSlug)
@@ -96,7 +111,6 @@ export async function POST(req: Request) {
       updatedAt: now,
     });
 
-    // criteria subcollection
     criteria.forEach((c, idx) => {
       const ref = tRef.collection("criteria").doc();
       batch.set(ref, {
@@ -109,13 +123,11 @@ export async function POST(req: Request) {
       });
     });
 
-    // wines subcollection (blind slots)
     for (let i = 1; i <= wineCount; i++) {
       const ref = tRef.collection("wines").doc();
       batch.set(ref, {
         blindNumber: i,
         isActive: true,
-        // revealed fields later:
         displayName: null,
         winery: null,
         grape: null,
