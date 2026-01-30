@@ -15,6 +15,13 @@ export async function POST(req: Request) {
     const scores = body.scores ?? {};
     const comment = String(body.comment ?? "").trim();
 
+    if (!Number.isInteger(blindNumber) || blindNumber < 1 || blindNumber > 10) {
+      return NextResponse.json({ error: "Invalid blindNumber" }, { status: 400 });
+    }
+    if (typeof scores !== "object" || Array.isArray(scores)) {
+      return NextResponse.json({ error: "scores must be an object" }, { status: 400 });
+    }
+
     const winesQ = await db()
       .collection("tastings")
       .doc(session.tastingId)
@@ -40,7 +47,7 @@ export async function POST(req: Request) {
           participantId: session.participantId,
           wineId,
           scores,
-          comment,
+          comment: comment || null,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
         { merge: true }
