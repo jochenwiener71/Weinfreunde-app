@@ -85,11 +85,20 @@ export default function AdminCreateTastingPage() {
         body: JSON.stringify(body),
       });
 
-      const json = await res.json();
-      const data = await res.json().catch(() => ({}));
-if (!res.ok) throw new Error(JSON.stringify(data));
+      // ✅ Response nur EINMAL lesen (wichtig!)
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { error: text || `HTTP ${res.status}` };
+      }
 
-      setResult(json);
+      if (!res.ok) {
+        throw new Error(data?.error ? String(data.error) : `HTTP ${res.status}`);
+      }
+
+      setResult(data);
       setMsg("Tasting erstellt ✅");
     } catch (e: any) {
       setMsg(e?.message ?? "Fehler");
@@ -223,7 +232,7 @@ if (!res.ok) throw new Error(JSON.stringify(data));
           <div
             key={i}
             style={{
-              border: "1px solid rgba(255,255,255,0.12)",
+              border: "1px solid rgba(0,0,0,0.12)",
               borderRadius: 8,
               padding: 12,
               marginBottom: 10,
@@ -298,11 +307,11 @@ if (!res.ok) throw new Error(JSON.stringify(data));
             marginTop: 12,
             padding: 12,
             borderRadius: 8,
-            background: "rgba(255,255,255,0.06)",
+            background: "rgba(0,0,0,0.06)",
             overflowX: "auto",
           }}
         >
-{JSON.stringify(result, null, 2)}
+          {JSON.stringify(result, null, 2)}
         </pre>
       )}
 
