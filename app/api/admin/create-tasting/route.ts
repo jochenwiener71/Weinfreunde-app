@@ -5,20 +5,23 @@ import { hashPin } from "../../../../lib/security";
 
 type CriterionInput = { label: string; scaleMin: number; scaleMax: number };
 
-function pickProvidedSecret(req: Request, body: any): { value: string; source: string } {
+function getProvidedSecret(req: Request, body: any): string {
+  // Primary: header
   const header =
     req.headers.get("x-admin-secret") ||
     req.headers.get("X-Admin-Secret") ||
     "";
 
-  if (header && header.trim()) return { value: header.trim(), source: "header:x-admin-secret" };
+  if (header && header.trim()) return header.trim();
 
+  // Secondary: Bearer token
   const auth = req.headers.get("authorization") || "";
   if (auth.toLowerCase().startsWith("bearer ")) {
     const token = auth.slice(7).trim();
-    if (token) return { value: token, source: "header:authorization(bearer)" };
+    if (token) return token;
   }
 
+  // Fallback: body (optional)
   const fromBody =
     body?.adminSecret ??
     body?.ADMIN_SECRET ??
@@ -26,10 +29,11 @@ function pickProvidedSecret(req: Request, body: any): { value: string; source: s
     body?.secret ??
     "";
 
-  const v = String(fromBody ?? "").trim();
-  if (v) return { value: v, source: "body" };
+  return String(fromBody ?? "").trim();
+}
 
-  return { value: "", source: "none" };
+function jsonError(message: string, status: number) {
+  return NextResponse.json({ error: message }, { status });
 }
 
 export async function POST(req: Request) {
@@ -41,32 +45,13 @@ export async function POST(req: Request) {
   }
 
   const expected = String(process.env.ADMIN_SECRET ?? "").trim();
-  const provided = pickProvidedSecret(req, body);
-
-  // WICHTIG: Wenn expected leer ist, ist es ein ENV-Problem (kein Forbidden)
   if (!expected) {
-    return NextResponse.json(
-      { error: "ADMIN_SECRET is not set in this deployment (Vercel env var missing or not applied)." },
-      { status: 500 }
-    );
+    return jsonError("Server misconfigured: ADMIN_SECRET missing", 500);
   }
 
-  if (!provided.value || provided.value !== expected) {
-    return NextResponse.json(
-      {
-        error: "Forbidden",
-        debug: {
-          expectedSet: true,
-          providedSource: provided.source,
-          providedLength: provided.value.length,
-          hint:
-            provided.source === "none"
-              ? "UI did not send the secret (header/body empty)."
-              : "Secret was sent but does not match Vercel ADMIN_SECRET for this deployment.",
-        },
-      },
-      { status: 403 }
-    );
+  const provided = getProvidedSecret(req, body);
+  if (!provided || provided !== expected) {
+    return jsonError("Forbidden", 403);
   }
 
   try {
@@ -79,10 +64,30 @@ export async function POST(req: Request) {
     const maxParticipants = Number(body.maxParticipants ?? 10);
     const criteria = (body.criteria ?? []) as CriterionInput[];
 
+    // Basic validation
     if (!publicSlug || !title || !hostName || !/^\d{4}$/.test(pin)) {
-      return NextResponse.json({ error: "Invalid input" }, { status: 400 });
+      return jsonError("Invalid input", 400);
+    }
+    if (!Number.isInteger(wineCount) || wineCount < 1 || wineCount > 10) {
+      return jsonError("Invalid wineCount", 400);
+    }
+    if (!Number.isInteger(maxParticipants) || maxParticipants < 1 || maxParticipants > 10) {
+      return jsonError("Invalid maxParticipants", 400);
+    }
+    if (!Array.isArray(criteria) || criteria.length < 1 || criteria.length > 8) {
+      return jsonError("Invalid criteria", 400);
+    }
+    if (criteria.some((c) => !String(c.label ?? "").trim())) {
+      return jsonError("Criteria labels must not be empty", 400);
     }
 
+    // Enforce slug format (recommended)
+    // If you want to allow spaces, remove this block.
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(publicSlug)) {
+      return jsonError("publicSlug must be lowercase and use only a-z, 0-9 and hyphens", 400);
+    }
+
+    // Uniqueness check
     const existing = await db()
       .collection("tastings")
       .where("publicSlug", "==", publicSlug)
@@ -90,7 +95,7 @@ export async function POST(req: Request) {
       .get();
 
     if (!existing.empty) {
-      return NextResponse.json({ error: "publicSlug already exists" }, { status: 409 });
+      return jsonError("publicSlug already exists", 409);
     }
 
     const now = admin.firestore.FieldValue.serverTimestamp();
@@ -111,6 +116,7 @@ export async function POST(req: Request) {
       updatedAt: now,
     });
 
+    // Criteria subcollection
     criteria.forEach((c, idx) => {
       const ref = tRef.collection("criteria").doc();
       batch.set(ref, {
@@ -123,6 +129,7 @@ export async function POST(req: Request) {
       });
     });
 
+    // Wine slots subcollection
     for (let i = 1; i <= wineCount; i++) {
       const ref = tRef.collection("wines").doc();
       batch.set(ref, {
@@ -141,6 +148,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true, tastingId: tRef.id, publicSlug });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Create tasting failed" }, { status: 500 });
+    return jsonError(e?.message ?? "Create tasting failed", 500);
   }
 }
