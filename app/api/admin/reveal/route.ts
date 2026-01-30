@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import admin from "firebase-admin";
-import { db } from "../../../../lib/firebaseAdmin";
+import { db } from "../../../lib/firebaseAdmin";
 
 function pickProvidedSecret(req: Request): { value: string; source: string } {
   const header =
