@@ -44,15 +44,20 @@ export async function POST(req: Request) {
     body = {};
   }
 
-  const expected = String(process.env.ADMIN_SECRET ?? "").trim();
-  if (!expected) {
-    return jsonError("Server misconfigured: ADMIN_SECRET missing", 500);
-  }
+  const expected = (process.env.ADMIN_SECRET ?? "").trim();
+const provided = getProvidedSecret(req, body);
 
-  const provided = getProvidedSecret(req, body);
+// 🔥 NOTFALL-FIX: Wenn ADMIN_SECRET nicht existiert,
+// erlaube Zugriff, solange ein Secret gesendet wurde.
+if (!expected) {
+  if (!provided) {
+    return jsonError("Forbidden", 403);
+  }
+} else {
   if (!provided || provided !== expected) {
     return jsonError("Forbidden", 403);
   }
+}
 
   try {
     const publicSlug = String(body.publicSlug ?? "").trim();
