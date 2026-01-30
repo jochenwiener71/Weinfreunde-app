@@ -1,82 +1,109 @@
 import { NextResponse } from "next/server";
+import admin from "firebase-admin";
+import { db } from "../../../../lib/firebaseAdmin";
 
-export const runtime = "nodejs"; // wichtig: garantiert Node-Runtime
+function pickProvidedSecret(req: Request, body: any): string {
+  const header =
+    req.headers.get("x-admin-secret") ||
+    req.headers.get("X-Admin-Secret") ||
+    "";
 
-function isSet(name: string): boolean {
-  const v = process.env[name];
-  return Boolean(v && String(v).trim().length > 0);
+  if (header && header.trim()) return header.trim();
+
+  const auth = req.headers.get("authorization") || "";
+  if (auth.toLowerCase().startsWith("bearer ")) {
+    const token = auth.slice(7).trim();
+    if (token) return token;
+  }
+
+  const fromBody =
+    body?.adminSecret ??
+    body?.ADMIN_SECRET ??
+    body?.admin_secret ??
+    body?.secret ??
+    "";
+
+  return String(fromBody ?? "").trim();
 }
 
-function len(name: string): number {
-  const v = process.env[name];
-  return v ? String(v).length : 0;
-}
+export async function POST(req: Request) {
+  let body: any = {};
+  try {
+    body = await req.json().catch(() => ({}));
+  } catch {
+    body = {};
+  }
 
-export async function GET() {
-  const keys = [
-    "ADMIN_SECRET",
-    "PIN_SALT",
-    "FIREBASE_SERVICE_ACCOUNT_B64",
-    "FIREBASE_PROJECT_ID",
-    "FIREBASE_CLIENT_EMAIL",
-    "FIREBASE_PRIVATE_KEY",
-  ];
+  const expected = String(process.env.ADMIN_SECRET ?? "").trim();
+  if (!expected) {
+    return NextResponse.json(
+      { error: "Server misconfigured: ADMIN_SECRET missing" },
+      { status: 500 }
+    );
+  }
 
-  const rows = keys
-    .map((k) => {
-      const ok = isSet(k);
-      const l = len(k);
-      return `
-        <tr>
-          <td style="padding:8px;border-bottom:1px solid #ddd;font-family:system-ui">${k}</td>
-          <td style="padding:8px;border-bottom:1px solid #ddd;font-family:system-ui">
-            ${ok ? "✅ true" : "❌ false"}
-          </td>
-          <td style="padding:8px;border-bottom:1px solid #ddd;font-family:system-ui">
-            ${l}
-          </td>
-        </tr>
-      `;
-    })
-    .join("");
+  const provided = pickProvidedSecret(req, body);
+  if (!provided || provided !== expected) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
-  const html = `<!doctype html>
-<html lang="de">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Env Reveal</title>
-</head>
-<body style="margin:0;padding:24px;font-family:system-ui;background:#fff;color:#111">
-  <h1 style="margin:0 0 12px 0">Env Reveal (safe)</h1>
-  <p style="margin:0 0 16px 0;color:#555">
-    Zeigt nur <strong>true/false</strong> und die <strong>Länge</strong> der Env-Variablen.
-    Keine Secrets werden ausgegeben.
-  </p>
+  const publicSlug = String(body.publicSlug ?? "").trim();
+  const tastingId = String(body.tastingId ?? "").trim();
 
-  <table style="border-collapse:collapse;width:100%;max-width:720px">
-    <thead>
-      <tr>
-        <th style="text-align:left;padding:8px;border-bottom:2px solid #000">Variable</th>
-        <th style="text-align:left;padding:8px;border-bottom:2px solid #000">Gesetzt?</th>
-        <th style="text-align:left;padding:8px;border-bottom:2px solid #000">Länge</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${rows}
-    </tbody>
-  </table>
+  if (!publicSlug && !tastingId) {
+    return NextResponse.json(
+      { error: "Provide either publicSlug or tastingId" },
+      { status: 400 }
+    );
+  }
 
-  <hr style="margin:24px 0" />
+  try {
+    // Tasting finden
+    let tRef: FirebaseFirestore.DocumentReference | null = null;
 
-  <p style="color:#555;font-size:14px">
-    NODE_ENV: <strong>${process.env.NODE_ENV ?? "n/a"}</strong><br/>
-    VERCEL_ENV: <strong>${process.env.VERCEL_ENV ?? "n/a"}</strong>
-  </p>
-</body>
-</html>`;
+    if (tastingId) {
+      tRef = db().collection("tastings").doc(tastingId);
+      const snap = await tRef.get();
+      if (!snap.exists) {
+        return NextResponse.json({ error: "Tasting not found" }, { status: 404 });
+      }
+    } else {
+      const q = await db()
+        .collection("tastings")
+        .where("publicSlug", "==", publicSlug)
+        .limit(1)
+        .get();
 
-  return new NextResponse(html, {
-    headers: { "content-type": "text/html; charset=utf-8" },
-  });
+      if (q.empty) {
+        return NextResponse.json({ error: "Tasting not found" }, { status: 404 });
+      }
+      tRef = q.docs[0].ref;
+    }
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+
+    await tRef!.set(
+      {
+        status: "revealed",
+        revealedAt: now,
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+
+    const tSnap = await tRef!.get();
+    const data = tSnap.data() || {};
+
+    return NextResponse.json({
+      ok: true,
+      tastingId: tRef!.id,
+      publicSlug: data.publicSlug ?? publicSlug ?? null,
+      status: "revealed",
+    });
+  } catch (e: any) {
+    return NextResponse.json(
+      { error: e?.message ?? "Reveal failed" },
+      { status: 500 }
+    );
+  }
 }
