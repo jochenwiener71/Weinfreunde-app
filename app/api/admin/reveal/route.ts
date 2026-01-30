@@ -1,59 +1,29 @@
 import { NextResponse } from "next/server";
-import admin from "firebase-admin";
-import { db } from "../../../../lib/firebaseAdmin";
 
-export async function POST(req: Request) {
-  try {
-    const secret = req.headers.get("x-admin-secret") ?? "";
-    if (!process.env.ADMIN_SECRET || secret !== process.env.ADMIN_SECRET) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+export const runtime = "nodejs"; // wichtig: garantiert Node-Runtime (nicht Edge)
 
-    const body = await req.json();
-    const tastingId = String(body.tastingId ?? "").trim();
-    const wines = body.wines;
+function isSet(name: string) {
+  const v = process.env[name];
+  return Boolean(v && String(v).trim().length > 0);
+}
 
-    if (!tastingId) {
-      return NextResponse.json({ error: "Missing tastingId" }, { status: 400 });
-    }
-    if (!Array.isArray(wines)) {
-      return NextResponse.json({ error: "Missing wines array" }, { status: 400 });
-    }
+export async function GET() {
+  const keys = [
+    "ADMIN_SECRET",
+    "PIN_SALT",
+    "FIREBASE_SERVICE_ACCOUNT_B64",
+    "FIREBASE_PROJECT_ID",
+    "FIREBASE_CLIENT_EMAIL",
+    "FIREBASE_PRIVATE_KEY",
+  ];
 
-    const tRef = db().collection("tastings").doc(tastingId);
-    const batch = db().batch();
+  const result: Record<string, boolean> = {};
+  for (const k of keys) result[k] = isSet(k);
 
-    for (const w of wines) {
-      const wineId = String(w.wineId ?? "").trim();
-      if (!wineId) continue;
-
-      batch.set(
-        tRef.collection("wines").doc(wineId),
-        {
-          displayName: w.displayName ?? null,
-          winery: w.winery ?? null,
-          grape: w.grape ?? null,
-          vintage: w.vintage ?? null,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-    }
-
-    batch.set(
-      tRef,
-      {
-        status: "revealed",
-        revealedAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-
-    await batch.commit();
-
-    return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Reveal failed" }, { status: 500 });
-  }
+  return NextResponse.json({
+    ok: true,
+    env: result,
+    nodeEnv: process.env.NODE_ENV ?? null,
+    vercelEnv: process.env.VERCEL_ENV ?? null,
+  });
 }
