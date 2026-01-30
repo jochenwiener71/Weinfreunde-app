@@ -1,35 +1,30 @@
 import admin from "firebase-admin";
 
-function mustGet(name: string): string {
-  const v = (process.env[name] ?? "").toString().trim();
-  if (!v) throw new Error(`Missing Firebase env vars. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY.`);
+function getEnv(name: string): string {
+  const v = process.env[name];
+  if (!v) {
+    throw new Error(
+      "Missing Firebase env vars. Set FIREBASE_SERVICE_ACCOUNT_B64."
+    );
+  }
   return v;
 }
 
-function normalizePrivateKey(raw: string): string {
-  // Accept:
-  // - real newlines
-  // - "\n" escaped newlines
-  // - accidental surrounding quotes
-  const trimmed = raw.trim().replace(/^"(.*)"$/s, "$1").replace(/^'(.*)'$/s, "$1");
-  return trimmed.includes("\\n") ? trimmed.replace(/\\n/g, "\n") : trimmed;
+function initAdmin() {
+  if (admin.apps.length) return;
+
+  // 🔐 Service Account als Base64 (robust, kein Zeilenumbruch-Stress)
+  const b64 = getEnv("FIREBASE_SERVICE_ACCOUNT_B64");
+  const json = JSON.parse(
+    Buffer.from(b64, "base64").toString("utf8")
+  );
+
+  admin.initializeApp({
+    credential: admin.credential.cert(json),
+  });
 }
 
 export function db() {
-  if (!admin.apps.length) {
-    const projectId = mustGet("FIREBASE_PROJECT_ID");
-    const clientEmail = mustGet("FIREBASE_CLIENT_EMAIL");
-    const privateKeyRaw = mustGet("FIREBASE_PRIVATE_KEY");
-    const privateKey = normalizePrivateKey(privateKeyRaw);
-
-    admin.initializeApp({
-      credential: admin.credential.cert({
-        projectId,
-        clientEmail,
-        privateKey,
-      }),
-    });
-  }
-
+  initAdmin();
   return admin.firestore();
 }
