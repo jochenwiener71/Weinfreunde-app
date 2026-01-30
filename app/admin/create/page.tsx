@@ -86,7 +86,8 @@ export default function AdminCreateTastingPage() {
       });
 
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? "Create failed");
+      const data = await res.json().catch(() => ({}));
+if (!res.ok) throw new Error(JSON.stringify(data));
 
       setResult(json);
       setMsg("Tasting erstellt ✅");
