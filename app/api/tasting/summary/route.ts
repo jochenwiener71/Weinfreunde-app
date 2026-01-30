@@ -1,129 +1,162 @@
 import { NextResponse } from "next/server";
-import { db } from "../../../../lib/firebaseAdmin";
-import { hashPin } from "../../../../lib/security";
+import admin from "firebase-admin";
+import { db } from "../../../lib/firebaseAdmin";
 
-type RatingDoc = {
-  blindNumber: number;
-  scores: Record<string, number>; // { "Nase": 7, "Gaumen": 8, ... }
-  createdAt?: any;
-};
+type Criterion = { id: string; label: string; order?: number };
 
-function bad(msg: string, status = 400) {
-  return NextResponse.json({ error: msg }, { status });
+function num(x: any): number | null {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : null;
 }
 
-export async function POST(req: Request) {
-  let body: any = {};
+function pickBlindNumber(doc: any): number | null {
+  // support common keys
+  return (
+    num(doc?.blindNumber) ??
+    num(doc?.wineNumber) ??
+    num(doc?.wineNo) ??
+    num(doc?.wine) ??
+    null
+  );
+}
+
+function pickScores(doc: any): Record<string, any> {
+  // support common shapes
+  // - scores: { "Nase": 7, "Gaumen": 8 }
+  // - ratings: { ... }
+  // - values:  { ... }
+  return (
+    (doc?.scores && typeof doc.scores === "object" ? doc.scores : null) ??
+    (doc?.ratings && typeof doc.ratings === "object" ? doc.ratings : null) ??
+    (doc?.values && typeof doc.values === "object" ? doc.values : null) ??
+    {}
+  );
+}
+
+export async function GET(req: Request) {
   try {
-    body = await req.json().catch(() => ({}));
-  } catch {
-    body = {};
-  }
+    const url = new URL(req.url);
+    const publicSlug = (url.searchParams.get("publicSlug") ?? "").trim();
 
-  const publicSlug = String(body.publicSlug ?? "").trim();
-  const pin = String(body.pin ?? "").trim();
+    if (!publicSlug) {
+      return NextResponse.json({ error: "Missing publicSlug" }, { status: 400 });
+    }
 
-  if (!publicSlug) return bad("publicSlug missing");
-  if (!/^\d{4}$/.test(pin)) return bad("pin must be 4 digits");
-
-  try {
-    // 1) Tasting laden
-    const q = await db()
+    // Find tasting by publicSlug
+    const tSnap = await db()
       .collection("tastings")
       .where("publicSlug", "==", publicSlug)
       .limit(1)
       .get();
 
-    if (q.empty) return bad("Tasting not found", 404);
-
-    const tDoc = q.docs[0];
-    const tasting = tDoc.data() as any;
-
-    // 2) PIN prüfen
-    const expectedHash = String(tasting.pinHash ?? "");
-    const providedHash = hashPin(pin);
-
-    if (!expectedHash || providedHash !== expectedHash) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (tSnap.empty) {
+      return NextResponse.json({ error: "Tasting not found" }, { status: 404 });
     }
 
-    // 3) Wines laden (für Reihenfolge)
-    const winesSnap = await tDoc.ref.collection("wines").get();
-    const wines = winesSnap.docs
-      .map((d) => d.data() as any)
-      .filter((w) => Number.isFinite(w.blindNumber))
-      .sort((a, b) => Number(a.blindNumber) - Number(b.blindNumber));
+    const tRef = tSnap.docs[0].ref;
+    const tData: any = tSnap.docs[0].data();
 
-    // 4) Ratings laden
-    // Erwartete Struktur: tastings/{tId}/ratings/{doc}
-    // doc: { blindNumber: number, scores: { [label]: number } }
-    const ratingsSnap = await tDoc.ref.collection("ratings").get();
-    const ratings: RatingDoc[] = ratingsSnap.docs
-      .map((d) => d.data() as any)
-      .filter((r) => Number.isFinite(r.blindNumber) && r.scores && typeof r.scores === "object");
+    const status = String(tData?.status ?? "draft");
+    const wineCount = Number(tData?.wineCount ?? 0);
 
-    // 5) Aggregation
-    // Map blindNumber -> criterionLabel -> { sum, n }
-    const agg: Record<number, Record<string, { sum: number; n: number }>> = {};
+    // Load criteria (ordered)
+    const cSnap = await tRef.collection("criteria").orderBy("order", "asc").get();
+    const criteria: Criterion[] = cSnap.docs.map((d) => {
+      const data: any = d.data();
+      return {
+        id: d.id,
+        label: String(data?.label ?? "").trim(),
+        order: Number(data?.order ?? 0),
+      };
+    }).filter((c) => c.label.length > 0);
 
-    for (const r of ratings) {
-      const bn = Number(r.blindNumber);
-      agg[bn] ||= {};
+    // If not revealed, still return meta (page can show "not revealed")
+    if (status !== "revealed") {
+      return NextResponse.json({
+        ok: true,
+        publicSlug,
+        tastingId: tRef.id,
+        status,
+        wineCount,
+        criteria,
+        message: "Not revealed yet",
+      });
+    }
 
-      for (const [label, value] of Object.entries(r.scores || {})) {
-        const v = Number(value);
-        if (!Number.isFinite(v)) continue;
+    // Load ratings
+    const rSnap = await tRef.collection("ratings").get();
 
-        agg[bn][label] ||= { sum: 0, n: 0 };
-        agg[bn][label].sum += v;
-        agg[bn][label].n += 1;
+    // Aggregation:
+    // wineAgg[blindNumber][criterionLabel] = { sum, count }
+    const wineAgg: Record<number, Record<string, { sum: number; count: number }>> = {};
+    const wineOverall: Record<number, { sum: number; count: number }> = {};
+
+    for (const r of rSnap.docs) {
+      const rd: any = r.data();
+      const blind = pickBlindNumber(rd);
+      if (!blind || blind < 1) continue;
+
+      const scores = pickScores(rd);
+
+      if (!wineAgg[blind]) wineAgg[blind] = {};
+      if (!wineOverall[blind]) wineOverall[blind] = { sum: 0, count: 0 };
+
+      // For each criterion, try multiple keys:
+      // 1) criterion label (e.g. "Nase")
+      // 2) criterion id (doc id in criteria collection)
+      // 3) lowercase label
+      for (const c of criteria) {
+        const v =
+          num(scores?.[c.label]) ??
+          num(scores?.[c.id]) ??
+          num(scores?.[c.label.toLowerCase()]);
+
+        if (v === null) continue;
+
+        if (!wineAgg[blind][c.label]) wineAgg[blind][c.label] = { sum: 0, count: 0 };
+        wineAgg[blind][c.label].sum += v;
+        wineAgg[blind][c.label].count += 1;
+
+        wineOverall[blind].sum += v;
+        wineOverall[blind].count += 1;
       }
     }
 
-    // 6) Build summary rows
-    const rows = wines.map((w: any) => {
-      const bn = Number(w.blindNumber);
-      const byCrit = agg[bn] || {};
-      const criteria = Object.entries(byCrit).reduce((acc, [label, s]) => {
-        acc[label] = s.n ? Number((s.sum / s.n).toFixed(2)) : null;
-        return acc;
-      }, {} as Record<string, number | null>);
+    // Build rows 1..wineCount (or infer max from ratings if wineCount missing)
+    const maxWine =
+      Number.isFinite(wineCount) && wineCount > 0
+        ? wineCount
+        : Math.max(0, ...Object.keys(wineAgg).map((k) => Number(k)));
 
-      // Gesamt = Ø über vorhandene Kriterien
-      const vals = Object.values(criteria).filter((x): x is number => typeof x === "number");
-      const total = vals.length ? Number((vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2)) : null;
+    const rows = Array.from({ length: maxWine }, (_, i) => i + 1).map((blindNumber) => {
+      const perCrit: Record<string, number | null> = {};
+      for (const c of criteria) {
+        const cell = wineAgg?.[blindNumber]?.[c.label];
+        perCrit[c.label] = cell && cell.count > 0 ? cell.sum / cell.count : null;
+      }
 
-      return {
-        blindNumber: bn,
-        criteria,
-        total,
-      };
+      const o = wineOverall?.[blindNumber];
+      const overall = o && o.count > 0 ? o.sum / o.count : null;
+
+      return { blindNumber, perCrit, overall };
     });
 
-    // 7) Ranking
+    // Ranking by overall desc, nulls last
     const ranking = [...rows]
-      .filter((r) => typeof r.total === "number")
-      .sort((a, b) => (b.total as number) - (a.total as number))
-      .map((r, idx) => ({
-        rank: idx + 1,
-        blindNumber: r.blindNumber,
-        total: r.total,
-      }));
+      .filter((r) => r.overall !== null)
+      .sort((a, b) => (b.overall! - a.overall!));
 
     return NextResponse.json({
       ok: true,
       publicSlug,
-      status: tasting.status ?? null,
-      counts: {
-        wines: wines.length,
-        ratings: ratings.length,
-      },
+      tastingId: tRef.id,
+      status,
+      wineCount: maxWine,
+      criteria,
       rows,
       ranking,
-      note:
-        ratings.length === 0
-          ? "No ratings found. Expected Firestore path: tastings/{tastingId}/ratings with fields {blindNumber, scores:{...}}"
-          : null,
+      ratingCount: rSnap.size,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(), // informational
     });
   } catch (e: any) {
     return NextResponse.json(
