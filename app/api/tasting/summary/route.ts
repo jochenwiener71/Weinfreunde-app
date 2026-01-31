@@ -8,62 +8,13 @@ function toNum(x: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function pickBlindNumber(d: any): number | null {
-  // flat keys
-  const flat =
-    toNum(d?.blindNumber) ??
-    toNum(d?.wineNumber) ??
-    toNum(d?.wineNo) ??
-    toNum(d?.wine) ??
-    toNum(d?.wineIndex) ??
-    null;
-  if (flat !== null) return flat;
-
-  // nested keys sometimes used
-  const nested =
-    toNum(d?.wine?.blindNumber) ??
-    toNum(d?.wine?.wineNumber) ??
-    toNum(d?.wine?.number) ??
-    null;
-
-  return nested;
-}
-
-function pickScoresObject(d: any): Record<string, any> | null {
-  const candidates = [d?.scores, d?.ratings, d?.values, d?.byCriterion, d?.criteriaScores];
-  for (const c of candidates) {
-    if (c && typeof c === "object" && !Array.isArray(c)) return c as Record<string, any>;
-  }
-  return null;
-}
-
-function pickSingleCriterionValue(d: any): { key: string | null; value: number | null } {
-  const key =
-    (typeof d?.criterionId === "string" && d.criterionId.trim()) ? d.criterionId.trim() :
-    (typeof d?.criterionLabel === "string" && d.criterionLabel.trim()) ? d.criterionLabel.trim() :
-    (typeof d?.criterion === "string" && d.criterion.trim()) ? d.criterion.trim() :
-    (typeof d?.label === "string" && d.label.trim()) ? d.label.trim() :
-    null;
-
-  const value =
-    toNum(d?.value) ??
-    toNum(d?.score) ??
-    toNum(d?.rating) ??
-    toNum(d?.points) ??
-    null;
-
-  return { key, value };
-}
-
 function safeKeys(obj: any): string[] {
   if (!obj || typeof obj !== "object") return [];
   return Object.keys(obj).slice(0, 60);
 }
 
 function safePreview(obj: any): any {
-  // Avoid dumping large payloads; just a small, readable sample
   if (!obj || typeof obj !== "object") return obj;
-
   const out: any = {};
   for (const k of Object.keys(obj).slice(0, 25)) {
     const v = (obj as any)[k];
@@ -84,6 +35,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Missing publicSlug" }, { status: 400 });
     }
 
+    // Find tasting by publicSlug
     const tSnap = await db()
       .collection("tastings")
       .where("publicSlug", "==", publicSlug)
@@ -101,6 +53,7 @@ export async function GET(req: Request) {
     const status = String(tData?.status ?? "draft");
     const wineCountRaw = Number(tData?.wineCount ?? 0);
 
+    // Load criteria (ordered)
     const cSnap = await tRef.collection("criteria").orderBy("order", "asc").get();
     const criteria: Criterion[] = cSnap.docs
       .map((d) => {
@@ -125,9 +78,21 @@ export async function GET(req: Request) {
       });
     }
 
+    // ✅ Load wines to map wineId -> blindNumber
+    const wSnap = await tRef.collection("wines").get();
+    const wineIdToBlind: Record<string, number> = {};
+    for (const w of wSnap.docs) {
+      const wd: any = w.data();
+      const blind = toNum(wd?.blindNumber) ?? toNum(wd?.number) ?? null;
+      if (blind !== null) {
+        wineIdToBlind[w.id] = blind;
+      }
+    }
+
+    // Load ratings
     const rSnap = await tRef.collection("ratings").get();
 
-    // --- DEBUG: show rating schema samples (keys + preview) ---
+    // Debug samples
     const debugSamples = debug
       ? rSnap.docs.slice(0, 5).map((d) => {
           const data: any = d.data();
@@ -139,7 +104,7 @@ export async function GET(req: Request) {
         })
       : undefined;
 
-    // Aggregation maps
+    // Aggregation:
     const wineAgg: Record<number, Record<string, { sum: number; count: number }>> = {};
     const wineOverall: Record<number, { sum: number; count: number }> = {};
 
@@ -154,67 +119,29 @@ export async function GET(req: Request) {
       wineOverall[blind].count += 1;
     }
 
-    // Helper: process one "rating entry" (flat or nested)
-    function processEntry(entry: any) {
-      const blind = pickBlindNumber(entry);
-      if (!blind || blind < 1) return;
-
-      // Model A: object with many scores
-      const scoresObj = pickScoresObject(entry);
-      if (scoresObj) {
-        for (const c of criteria) {
-          const v =
-            toNum(scoresObj?.[c.label]) ??
-            toNum(scoresObj?.[c.id]) ??
-            toNum(scoresObj?.[c.label.toLowerCase()]) ??
-            null;
-          if (v !== null) addScore(blind, c.label, v);
-        }
-        return;
-      }
-
-      // Model B: one criterion per doc/entry
-      const one = pickSingleCriterionValue(entry);
-      if (one.key && one.value !== null) {
-        const byId = criteria.find((c) => c.id === one.key);
-        const byLabel = criteria.find((c) => c.label === one.key);
-        const label = byId?.label ?? byLabel?.label ?? one.key;
-        addScore(blind, label, one.value);
-      }
-    }
-
-    // Iterate ratings docs – support multiple schema shapes
     for (const r of rSnap.docs) {
       const rd: any = r.data();
 
-      // Shape 1: direct flat doc
-      processEntry(rd);
+      // ✅ your schema: wineId + scores keyed by criterionId
+      const wineId = String(rd?.wineId ?? "").trim();
+      const blind = wineId ? (wineIdToBlind[wineId] ?? null) : null;
 
-      // Shape 2: doc contains wines array (common!)
-      const winesArr = rd?.wines ?? rd?.weine ?? rd?.items ?? rd?.entries;
-      if (Array.isArray(winesArr)) {
-        for (const w of winesArr) processEntry(w);
-      }
+      if (!blind || blind < 1) continue;
 
-      // Shape 3: doc contains byWine object: { "1": {...}, "2": {...} }
-      const byWine = rd?.byWine ?? rd?.winesByNumber ?? rd?.ratingsByWine;
-      if (byWine && typeof byWine === "object" && !Array.isArray(byWine)) {
-        for (const k of Object.keys(byWine)) {
-          const entry = byWine[k];
-          // if entry lacks blindNumber, inject from key
-          if (entry && typeof entry === "object" && pickBlindNumber(entry) === null) {
-            processEntry({ ...entry, blindNumber: Number(k) });
-          } else {
-            processEntry(entry);
-          }
-        }
+      const scores = rd?.scores && typeof rd.scores === "object" ? rd.scores : null;
+      if (!scores) continue;
+
+      // scores keys are criterion IDs
+      for (const c of criteria) {
+        const v = toNum(scores?.[c.id]);
+        if (v !== null) addScore(blind, c.label, v);
       }
     }
 
     const maxWine =
       Number.isFinite(wineCountRaw) && wineCountRaw > 0
         ? wineCountRaw
-        : Math.max(0, ...Object.keys(wineAgg).map((k) => Number(k)));
+        : Math.max(0, ...Object.values(wineIdToBlind));
 
     const rows = Array.from({ length: maxWine }, (_, i) => i + 1).map((blindNumber) => {
       const perCrit: Record<string, number | null> = {};
@@ -241,7 +168,7 @@ export async function GET(req: Request) {
       rows,
       ranking,
       ratingCount: rSnap.size,
-      ...(debug ? { debugSamples } : {}),
+      ...(debug ? { debugSamples, wineIdToBlind } : {}),
     });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? "Summary failed" }, { status: 500 });
