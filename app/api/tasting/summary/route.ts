@@ -76,6 +76,8 @@ export async function GET(req: Request) {
         winery: wd?.winery ?? null,
         grape: wd?.grape ?? null,
         vintage: wd?.vintage ?? null,
+        ownerName: wd?.ownerName ?? null,
+        serveOrder: (typeof wd?.serveOrder === "number" ? wd.serveOrder : null),
       };
     }
 
