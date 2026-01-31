@@ -1,42 +1,54 @@
 import { NextResponse } from "next/server";
-import admin from "firebase-admin";
 import { db } from "@/lib/firebaseAdmin";
 
 type Criterion = { id: string; label: string; order?: number };
 
-function num(x: any): number | null {
+function toNum(x: any): number | null {
   const n = Number(x);
   return Number.isFinite(n) ? n : null;
 }
 
-function pickBlindNumber(doc: any): number | null {
-  // support common keys
+function pickBlindNumber(d: any): number | null {
   return (
-    num(doc?.blindNumber) ??
-    num(doc?.wineNumber) ??
-    num(doc?.wineNo) ??
-    num(doc?.wine) ??
+    toNum(d?.blindNumber) ??
+    toNum(d?.wineNumber) ??
+    toNum(d?.wineNo) ??
+    toNum(d?.wine) ??
+    toNum(d?.wineIndex) ??
     null
   );
 }
 
-function pickScores(doc: any): Record<string, any> {
-  // support common shapes
-  // - scores: { "Nase": 7, "Gaumen": 8 }
-  // - ratings: { ... }
-  // - values:  { ... }
-  return (
-    (doc?.scores && typeof doc.scores === "object" ? doc.scores : null) ??
-    (doc?.ratings && typeof doc.ratings === "object" ? doc.ratings : null) ??
-    (doc?.values && typeof doc.values === "object" ? doc.values : null) ??
-    {}
-  );
+function pickScoresObject(d: any): Record<string, any> | null {
+  const candidates = [d?.scores, d?.ratings, d?.values, d?.byCriterion, d?.criteriaScores];
+  for (const c of candidates) {
+    if (c && typeof c === "object" && !Array.isArray(c)) return c as Record<string, any>;
+  }
+  return null;
+}
+
+function pickSingleCriterionValue(d: any): { key: string | null; value: number | null } {
+  const key =
+    (typeof d?.criterionId === "string" && d.criterionId.trim()) ? d.criterionId.trim() :
+    (typeof d?.criterionLabel === "string" && d.criterionLabel.trim()) ? d.criterionLabel.trim() :
+    (typeof d?.criterion === "string" && d.criterion.trim()) ? d.criterion.trim() :
+    (typeof d?.label === "string" && d.label.trim()) ? d.label.trim() :
+    null;
+
+  const value =
+    toNum(d?.value) ??
+    toNum(d?.score) ??
+    toNum(d?.rating) ??
+    toNum(d?.points) ??
+    null;
+
+  return { key, value };
 }
 
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
-    const publicSlug = (url.searchParams.get("publicSlug") ?? "").trim();
+    const publicSlug = String(url.searchParams.get("publicSlug") ?? "").trim();
 
     if (!publicSlug) {
       return NextResponse.json({ error: "Missing publicSlug" }, { status: 400 });
@@ -53,31 +65,34 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Tasting not found" }, { status: 404 });
     }
 
-    const tRef = tSnap.docs[0].ref;
-    const tData: any = tSnap.docs[0].data();
+    const tDoc = tSnap.docs[0];
+    const tRef = tDoc.ref;
+    const tData: any = tDoc.data();
 
     const status = String(tData?.status ?? "draft");
-    const wineCount = Number(tData?.wineCount ?? 0);
+    const wineCountRaw = Number(tData?.wineCount ?? 0);
 
     // Load criteria (ordered)
     const cSnap = await tRef.collection("criteria").orderBy("order", "asc").get();
-    const criteria: Criterion[] = cSnap.docs.map((d) => {
-      const data: any = d.data();
-      return {
-        id: d.id,
-        label: String(data?.label ?? "").trim(),
-        order: Number(data?.order ?? 0),
-      };
-    }).filter((c) => c.label.length > 0);
+    const criteria: Criterion[] = cSnap.docs
+      .map((d) => {
+        const data: any = d.data();
+        return {
+          id: d.id,
+          label: String(data?.label ?? "").trim(),
+          order: Number(data?.order ?? 0),
+        };
+      })
+      .filter((c) => c.label.length > 0);
 
-    // If not revealed, still return meta (page can show "not revealed")
+    // If not revealed, return meta only
     if (status !== "revealed") {
       return NextResponse.json({
         ok: true,
         publicSlug,
         tastingId: tRef.id,
         status,
-        wineCount,
+        wineCount: wineCountRaw,
         criteria,
         message: "Not revealed yet",
       });
@@ -91,41 +106,52 @@ export async function GET(req: Request) {
     const wineAgg: Record<number, Record<string, { sum: number; count: number }>> = {};
     const wineOverall: Record<number, { sum: number; count: number }> = {};
 
+    // Helper: add one criterion score
+    function addScore(blind: number, critLabel: string, v: number) {
+      if (!wineAgg[blind]) wineAgg[blind] = {};
+      if (!wineAgg[blind][critLabel]) wineAgg[blind][critLabel] = { sum: 0, count: 0 };
+      wineAgg[blind][critLabel].sum += v;
+      wineAgg[blind][critLabel].count += 1;
+
+      if (!wineOverall[blind]) wineOverall[blind] = { sum: 0, count: 0 };
+      wineOverall[blind].sum += v;
+      wineOverall[blind].count += 1;
+    }
+
     for (const r of rSnap.docs) {
       const rd: any = r.data();
       const blind = pickBlindNumber(rd);
       if (!blind || blind < 1) continue;
 
-      const scores = pickScores(rd);
+      // Modell A: ein Doc enthält Objekt mit vielen Scores
+      const scoresObj = pickScoresObject(rd);
+      if (scoresObj) {
+        for (const c of criteria) {
+          const v =
+            toNum(scoresObj?.[c.label]) ??
+            toNum(scoresObj?.[c.id]) ??
+            toNum(scoresObj?.[c.label.toLowerCase()]) ??
+            null;
 
-      if (!wineAgg[blind]) wineAgg[blind] = {};
-      if (!wineOverall[blind]) wineOverall[blind] = { sum: 0, count: 0 };
+          if (v !== null) addScore(blind, c.label, v);
+        }
+        continue;
+      }
 
-      // For each criterion, try multiple keys:
-      // 1) criterion label (e.g. "Nase")
-      // 2) criterion id (doc id in criteria collection)
-      // 3) lowercase label
-      for (const c of criteria) {
-        const v =
-          num(scores?.[c.label]) ??
-          num(scores?.[c.id]) ??
-          num(scores?.[c.label.toLowerCase()]);
-
-        if (v === null) continue;
-
-        if (!wineAgg[blind][c.label]) wineAgg[blind][c.label] = { sum: 0, count: 0 };
-        wineAgg[blind][c.label].sum += v;
-        wineAgg[blind][c.label].count += 1;
-
-        wineOverall[blind].sum += v;
-        wineOverall[blind].count += 1;
+      // Modell B: ein Doc = ein Kriterium
+      const one = pickSingleCriterionValue(rd);
+      if (one.key && one.value !== null) {
+        // key kann criterionId ODER label sein → auf label mappen, wenn möglich
+        const byId = criteria.find((c) => c.id === one.key);
+        const byLabel = criteria.find((c) => c.label === one.key);
+        const label = byId?.label ?? byLabel?.label ?? one.key;
+        addScore(blind, label, one.value);
       }
     }
 
-    // Build rows 1..wineCount (or infer max from ratings if wineCount missing)
     const maxWine =
-      Number.isFinite(wineCount) && wineCount > 0
-        ? wineCount
+      Number.isFinite(wineCountRaw) && wineCountRaw > 0
+        ? wineCountRaw
         : Math.max(0, ...Object.keys(wineAgg).map((k) => Number(k)));
 
     const rows = Array.from({ length: maxWine }, (_, i) => i + 1).map((blindNumber) => {
@@ -141,7 +167,6 @@ export async function GET(req: Request) {
       return { blindNumber, perCrit, overall };
     });
 
-    // Ranking by overall desc, nulls last
     const ranking = [...rows]
       .filter((r) => r.overall !== null)
       .sort((a, b) => (b.overall! - a.overall!));
@@ -156,12 +181,8 @@ export async function GET(req: Request) {
       rows,
       ranking,
       ratingCount: rSnap.size,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(), // informational
     });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message ?? "Summary failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message ?? "Summary failed" }, { status: 500 });
   }
 }
