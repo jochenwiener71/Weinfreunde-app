@@ -1,11 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Criterion = { id: string; label: string; order?: number };
 
+type WineMeta = {
+  wineId: string;
+  blindNumber: number;
+  displayName: string | null;
+  winery: string | null;
+  grape: string | null;
+  vintage: string | number | null;
+};
+
 type Row = {
   blindNumber: number;
+  wine: WineMeta | null;
   perCrit: Record<string, number | null>;
   overall: number | null;
 };
@@ -28,12 +38,36 @@ function fmt(n: number | null | undefined) {
   return Number(n).toFixed(2).replace(".", ",");
 }
 
+function wineTitle(row: Row) {
+  // show true name only if present
+  const meta = row.wine;
+  if (meta?.displayName && meta.displayName.trim()) return meta.displayName.trim();
+  return `Wein ${String(row.blindNumber).padStart(2, "0")}`;
+}
+
+function wineSubtitle(row: Row) {
+  const m = row.wine;
+  if (!m) return null;
+  const parts = [m.winery, m.grape, m.vintage].filter((x) => x !== null && String(x).trim().length > 0);
+  return parts.length ? parts.join(" · ") : null;
+}
+
 export default function ResultsPage({ params }: { params: { slug: string } }) {
   const slug = params.slug;
 
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<Summary | null>(null);
   const [err, setErr] = useState<string | null>(null);
+
+  // Auto refresh
+  const [auto, setAuto] = useState(true);
+  const [intervalSec, setIntervalSec] = useState(10);
+  const timerRef = useRef<number | null>(null);
+
+  // Admin controls
+  const [adminSecret, setAdminSecret] = useState("");
+  const [adminMsg, setAdminMsg] = useState<string | null>(null);
+  const [adminBusy, setAdminBusy] = useState(false);
 
   const criteria = useMemo(() => {
     const list = data?.criteria ?? [];
@@ -63,10 +97,55 @@ export default function ResultsPage({ params }: { params: { slug: string } }) {
     }
   }
 
+  async function setStatus(status: "open" | "revealed" | "closed" | "draft") {
+    setAdminMsg(null);
+    setAdminBusy(true);
+    try {
+      const res = await fetch("/api/admin/reveal", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-secret": adminSecret.trim(),
+        },
+        body: JSON.stringify({ publicSlug: slug, status }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json?.error || `Admin request failed (${res.status})`);
+      }
+
+      setAdminMsg(`Status gesetzt: ${status} ✅`);
+      await load();
+    } catch (e: any) {
+      setAdminMsg(e?.message ?? "Admin Fehler");
+    } finally {
+      setAdminBusy(false);
+    }
+  }
+
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
+
+  // auto-refresh effect
+  useEffect(() => {
+    if (timerRef.current) window.clearInterval(timerRef.current);
+    timerRef.current = null;
+
+    if (!auto) return;
+
+    timerRef.current = window.setInterval(() => {
+      load();
+    }, Math.max(3, intervalSec) * 1000);
+
+    return () => {
+      if (timerRef.current) window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auto, intervalSec, slug]);
 
   const winner = data?.ranking?.[0] ?? null;
 
@@ -111,6 +190,85 @@ export default function ResultsPage({ params }: { params: { slug: string } }) {
         </button>
       </header>
 
+      {/* Auto refresh */}
+      <section style={{ marginTop: 14, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
+          Auto-Refresh
+        </label>
+
+        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          Intervall
+          <select
+            value={intervalSec}
+            onChange={(e) => setIntervalSec(Number(e.target.value))}
+            style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #ddd" }}
+          >
+            {[5, 10, 15, 30, 60].map((s) => (
+              <option key={s} value={s}>
+                {s}s
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <span style={{ color: "#666", fontSize: 13 }}>
+          Tipp: Während des Tastings 5–10s, danach aus.
+        </span>
+      </section>
+
+      {/* Admin controls */}
+      <section style={{ marginTop: 16, border: "1px solid #eee", borderRadius: 14, padding: 14 }}>
+        <div style={{ fontWeight: 800, marginBottom: 8 }}>Admin</div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "end" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <label style={{ fontSize: 13, color: "#444" }}>ADMIN_SECRET</label>
+            <input
+              value={adminSecret}
+              onChange={(e) => setAdminSecret(e.target.value)}
+              placeholder="dein ADMIN_SECRET"
+              autoCapitalize="none"
+              autoCorrect="off"
+              style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #ddd", minWidth: 260 }}
+            />
+          </div>
+
+          <button
+            onClick={() => setStatus("open")}
+            disabled={!adminSecret.trim() || adminBusy}
+            style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #111", background: "white" }}
+            title="Bewerten wieder öffnen"
+          >
+            Open
+          </button>
+
+          <button
+            onClick={() => setStatus("revealed")}
+            disabled={!adminSecret.trim() || adminBusy}
+            style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #111", background: "#111", color: "white" }}
+            title="Reveal/Ergebnisse anzeigen"
+          >
+            Reveal
+          </button>
+
+          <button
+            onClick={() => setStatus("closed")}
+            disabled={!adminSecret.trim() || adminBusy}
+            style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #111", background: "white" }}
+            title="Bewerten schließen"
+          >
+            Close
+          </button>
+
+          {adminMsg ? <div style={{ color: adminMsg.includes("✅") ? "#1a7f37" : "#8a1f1f" }}>{adminMsg}</div> : null}
+        </div>
+
+        <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
+          Hinweis: Secret wird nur im Browser genutzt (nicht gespeichert). Die Buttons ändern den Tasting-Status serverseitig.
+        </div>
+      </section>
+
       {loading ? (
         <div style={{ marginTop: 18, color: "#666" }}>Lade Daten…</div>
       ) : err ? (
@@ -152,7 +310,7 @@ export default function ResultsPage({ params }: { params: { slug: string } }) {
             <div style={{ border: "1px solid #eee", borderRadius: 14, padding: 14 }}>
               <div style={{ color: "#666", fontSize: 13 }}>Sieger</div>
               <div style={{ fontSize: 18, fontWeight: 800 }}>
-                {winner ? `Wein ${String(winner.blindNumber).padStart(2, "0")}` : "–"}
+                {winner ? wineTitle(winner) : "–"}
               </div>
               <div style={{ color: "#444", marginTop: 4 }}>
                 Ø {winner ? fmt(winner.overall) : "–"}
@@ -173,7 +331,7 @@ export default function ResultsPage({ params }: { params: { slug: string } }) {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "70px 1fr 120px",
+                    gridTemplateColumns: "70px 1.6fr 120px",
                     padding: "12px 14px",
                     background: "#fafafa",
                     fontWeight: 700,
@@ -189,13 +347,16 @@ export default function ResultsPage({ params }: { params: { slug: string } }) {
                     key={`rank-${r.blindNumber}`}
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "70px 1fr 120px",
+                      gridTemplateColumns: "70px 1.6fr 120px",
                       padding: "12px 14px",
                       borderTop: "1px solid #f0f0f0",
                     }}
                   >
                     <div style={{ fontWeight: 800 }}>{idx + 1}</div>
-                    <div>{`Wein ${String(r.blindNumber).padStart(2, "0")}`}</div>
+                    <div>
+                      <div style={{ fontWeight: 700 }}>{wineTitle(r)}</div>
+                      {wineSubtitle(r) ? <div style={{ color: "#666", fontSize: 13 }}>{wineSubtitle(r)}</div> : null}
+                    </div>
                     <div style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
                       <b>{fmt(r.overall)}</b>
                     </div>
@@ -210,7 +371,7 @@ export default function ResultsPage({ params }: { params: { slug: string } }) {
             <h2 style={{ margin: "0 0 10px 0" }}>Tabelle</h2>
 
             <div style={{ overflowX: "auto", border: "1px solid #eee", borderRadius: 14 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
                 <thead>
                   <tr style={{ background: "#fafafa" }}>
                     <th style={{ textAlign: "left", padding: 12, borderBottom: "1px solid #eee" }}>Wein</th>
@@ -228,8 +389,9 @@ export default function ResultsPage({ params }: { params: { slug: string } }) {
                 <tbody>
                   {data.rows.map((r) => (
                     <tr key={`row-${r.blindNumber}`} style={{ borderBottom: "1px solid #f4f4f4" }}>
-                      <td style={{ padding: 12, fontWeight: 700 }}>
-                        {`Wein ${String(r.blindNumber).padStart(2, "0")}`}
+                      <td style={{ padding: 12 }}>
+                        <div style={{ fontWeight: 800 }}>{wineTitle(r)}</div>
+                        {wineSubtitle(r) ? <div style={{ color: "#666", fontSize: 13 }}>{wineSubtitle(r)}</div> : null}
                       </td>
                       {criteria.map((c) => (
                         <td
@@ -244,7 +406,7 @@ export default function ResultsPage({ params }: { params: { slug: string } }) {
                           {fmt(r.perCrit?.[c.label])}
                         </td>
                       ))}
-                      <td style={{ padding: 12, textAlign: "right", fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
+                      <td style={{ padding: 12, textAlign: "right", fontWeight: 900, fontVariantNumeric: "tabular-nums" }}>
                         {fmt(r.overall)}
                       </td>
                     </tr>
@@ -254,7 +416,7 @@ export default function ResultsPage({ params }: { params: { slug: string } }) {
             </div>
 
             <p style={{ marginTop: 10, color: "#666", fontSize: 13 }}>
-              Hinweis: Weine ohne Bewertungen bleiben „–“. Sobald mehr Teilnehmer bewerten, füllt sich das Ranking automatisch.
+              Weine ohne Bewertungen bleiben „–“. Auto-Refresh aktualisiert Ranking & Tabelle live.
             </p>
           </section>
         </>
