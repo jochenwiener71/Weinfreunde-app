@@ -60,6 +60,8 @@ export async function GET(req: Request) {
         winery: string | null;
         grape: string | null;
         vintage: string | number | null;
+        ownerName: string | null;
+        serveOrder: string | null;
       }
     > = {};
 
