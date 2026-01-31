@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import admin from "firebase-admin";
-import { db } from "../../../lib/firebaseAdmin";
-import { hashPin } from "../../../lib/security";
+import { db } from "@/lib/firebaseAdmin";
+import { hashPin } from "@/lib/security";
 
 type CriterionInput = { label: string; scaleMin: number; scaleMax: number };
 
