@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { db } from "../../../lib/firebaseAdmin";
-import { requireAdminSecret } from "../../../lib/security";
+import { db } from "@/lib/firebaseAdmin";
+import { requireAdminSecret } from "@/lib/security";
 
 type WineSlot = {
   id: string;
@@ -18,6 +18,7 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url);
     const publicSlug = String(searchParams.get("publicSlug") ?? "").trim();
+
     if (!publicSlug) {
       return NextResponse.json({ error: "Missing publicSlug" }, { status: 400 });
     }
@@ -70,6 +71,9 @@ export async function GET(req: Request) {
       wines,
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message ?? "Error" },
+      { status: 500 }
+    );
   }
 }
