@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/firebaseAdmin";
-import { requireAdminSecret } from "@/lib/security";
+import { db } from "../../../lib/firebaseAdmin";
+import { requireAdminSecret } from "../../../lib/security";
 
 type WineSlot = {
   id: string;
@@ -66,6 +66,7 @@ export async function GET(req: Request) {
       hostName: data.hostName ?? null,
       status: data.status ?? null,
       wineCount: data.wineCount ?? wines.length,
+      maxParticipants: data.maxParticipants ?? null,
       wines,
     });
   } catch (e: any) {
