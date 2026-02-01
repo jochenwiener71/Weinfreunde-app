@@ -55,7 +55,7 @@ function getCredentialFromEnv(): admin.credential.Credential {
     let decoded = "";
     try {
       decoded = Buffer.from(b64, "base64").toString("utf8");
-    } catch (e: any) {
+    } catch {
       throw new Error(
         `FIREBASE_SERVICE_ACCOUNT_B64 could not be base64-decoded (length=${b64.length}).`
       );
@@ -75,13 +75,11 @@ function getCredentialFromEnv(): admin.credential.Credential {
     }
 
     if (kind === "pem") {
-      // This is THE common mistake: you encoded only the private key, not the full JSON.
       throw new Error(
         `FIREBASE_SERVICE_ACCOUNT_B64 decodes to a PEM private key, not to a JSON service account. You likely encoded only "private_key". You must base64-encode the entire serviceAccount.json file content.`
       );
     }
 
-    // Some other non-json decoded content
     const preview = decoded.trim().slice(0, 24).replace(/[^\x20-\x7E]/g, "�");
     throw new Error(
       `FIREBASE_SERVICE_ACCOUNT_B64 decoded content is not JSON (decodedKind=${kind}, decodedLen=${decoded.length}, preview="${preview}...").`
@@ -112,7 +110,15 @@ function init() {
   if (!_db) _db = admin.firestore();
 }
 
-export function db() {
+/**
+ * Optional: function form if you ever want it
+ */
+export function getDb() {
   init();
   return _db!;
 }
+
+/**
+ * ✅ Standard export: Firestore INSTANCE (so you can do db.collection(...))
+ */
+export const db = getDb();
