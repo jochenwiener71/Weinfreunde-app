@@ -41,6 +41,17 @@ type WinesResponse = {
   wines: WineSlotPublic[];
 };
 
+function sortKeyServeOrBlind(w: { serveOrder: number | null; blindNumber: number | null }) {
+  // if serveOrder set -> primary
+  if (typeof w.serveOrder === "number") return w.serveOrder * 1000 + (w.blindNumber ?? 999);
+  // else fallback to blindNumber
+  return 999_000 + (w.blindNumber ?? 999);
+}
+
+function sortKeyBlindOnly(blindNumber: number | null) {
+  return blindNumber ?? 999;
+}
+
 export default function TastingResultPage({ params }: { params: { slug: string } }) {
   const publicSlug = decodeURIComponent(params.slug);
 
@@ -49,6 +60,9 @@ export default function TastingResultPage({ params }: { params: { slug: string }
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+
+  // admin UI gating
+  const [adminMode, setAdminMode] = useState(false);
 
   // optional admin controls
   const [adminSecret, setAdminSecret] = useState("");
@@ -81,8 +95,16 @@ export default function TastingResultPage({ params }: { params: { slug: string }
     }
   }
 
-  // auto refresh (polling)
+  // auto refresh (polling) + adminMode via ?admin=1
   useEffect(() => {
+    // admin mode only if URL contains ?admin=1
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      setAdminMode(sp.get("admin") === "1");
+    } catch {
+      setAdminMode(false);
+    }
+
     let alive = true;
 
     (async () => {
@@ -122,6 +144,40 @@ export default function TastingResultPage({ params }: { params: { slug: string }
     const s = String(summary?.status ?? wines?.status ?? "").trim();
     return s || "unknown";
   }, [summary, wines]);
+
+  // Do we have any serveOrder at all?
+  const hasServeOrder = useMemo(() => {
+    return (wines?.wines ?? []).some((w) => typeof w.serveOrder === "number");
+  }, [wines]);
+
+  // For "Alle Weine" table, we want ordering by serveOrder if present, otherwise blindNumber
+  const rowsOrderedForDisplay = useMemo(() => {
+    const rows = (summary?.rows ?? []).slice();
+
+    if (!rows.length) return rows;
+
+    if (!hasServeOrder) {
+      return rows.sort((a, b) => sortKeyBlindOnly(a.blindNumber) - sortKeyBlindOnly(b.blindNumber));
+    }
+
+    // Build mapping blindNumber -> serveOrder for sorting
+    const serveByBlind = new Map<number, number>();
+    for (const w of wines?.wines ?? []) {
+      if (typeof w.blindNumber === "number" && typeof w.serveOrder === "number") {
+        serveByBlind.set(w.blindNumber, w.serveOrder);
+      }
+    }
+
+    return rows.sort((a, b) => {
+      const aServe = serveByBlind.get(a.blindNumber) ?? null;
+      const bServe = serveByBlind.get(b.blindNumber) ?? null;
+
+      const aKey = sortKeyServeOrBlind({ serveOrder: aServe, blindNumber: a.blindNumber });
+      const bKey = sortKeyServeOrBlind({ serveOrder: bServe, blindNumber: b.blindNumber });
+
+      return aKey - bKey;
+    });
+  }, [summary, wines, hasServeOrder]);
 
   async function setStatus(nextStatus: "open" | "revealed" | "closed" | "draft") {
     setAdminMsg(null);
@@ -167,6 +223,11 @@ export default function TastingResultPage({ params }: { params: { slug: string }
             Status: <b>{statusText}</b> · Ratings: <b>{summary?.ratingCount ?? "—"}</b>{" "}
             <span style={{ opacity: 0.7 }}>(Auto-Refresh alle 3s)</span>
           </p>
+          {hasServeOrder && (
+            <p style={{ margin: "6px 0 0 0", fontSize: 12, opacity: 0.7 }}>
+              Anzeige ist nach <b>Serve-Order</b> sortiert (wenn gesetzt), sonst nach Blindnummer.
+            </p>
+          )}
         </div>
 
         <button
@@ -184,51 +245,73 @@ export default function TastingResultPage({ params }: { params: { slug: string }
         </p>
       )}
 
-      {/* ADMIN CONTROLS (optional) */}
-      <section style={{ marginTop: 18, padding: 14, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10 }}>
-        <h2 style={{ margin: 0, fontSize: 16 }}>Admin (optional)</h2>
-        <p style={{ margin: "6px 0 12px 0", opacity: 0.75 }}>
-          Reveal direkt auslösen (Secret wird nur im Browser genutzt).
-        </p>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 10 }}>
-          <input
-            value={adminSecret}
-            onChange={(e) => setAdminSecret(e.target.value)}
-            placeholder="ADMIN_SECRET"
-            autoCapitalize="none"
-            autoCorrect="off"
-            style={{ padding: 10, borderRadius: 8, border: "1px solid rgba(0,0,0,0.2)" }}
-          />
-
-          <button
-            onClick={() => setStatus("open")}
-            disabled={!adminSecret.trim() || adminLoading}
-            style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.15)" }}
-          >
-            Open
-          </button>
-
-          <button
-            onClick={() => setStatus("revealed")}
-            disabled={!adminSecret.trim() || adminLoading}
-            style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.15)" }}
-          >
-            Reveal
-          </button>
-        </div>
-
-        {adminMsg && (
-          <p style={{ marginTop: 10, color: adminMsg.includes("✅") ? "inherit" : "crimson", whiteSpace: "pre-wrap" }}>
-            {adminMsg}
+      {/* ADMIN CONTROLS (hidden unless ?admin=1) */}
+      {adminMode && (
+        <section style={{ marginTop: 18, padding: 14, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10 }}>
+          <h2 style={{ margin: 0, fontSize: 16 }}>Admin</h2>
+          <p style={{ margin: "6px 0 12px 0", opacity: 0.75 }}>
+            Reveal direkt auslösen. (Admin sichtbar, weil URL <code>?admin=1</code> enthält.)
           </p>
-        )}
-      </section>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto auto", gap: 10 }}>
+            <input
+              value={adminSecret}
+              onChange={(e) => setAdminSecret(e.target.value)}
+              placeholder="ADMIN_SECRET"
+              autoCapitalize="none"
+              autoCorrect="off"
+              style={{ padding: 10, borderRadius: 8, border: "1px solid rgba(0,0,0,0.2)" }}
+            />
+
+            <button
+              onClick={() => setStatus("draft")}
+              disabled={!adminSecret.trim() || adminLoading}
+              style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.15)" }}
+            >
+              Draft
+            </button>
+
+            <button
+              onClick={() => setStatus("open")}
+              disabled={!adminSecret.trim() || adminLoading}
+              style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.15)" }}
+            >
+              Open
+            </button>
+
+            <button
+              onClick={() => setStatus("closed")}
+              disabled={!adminSecret.trim() || adminLoading}
+              style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.15)" }}
+            >
+              Closed
+            </button>
+
+            <button
+              onClick={() => setStatus("revealed")}
+              disabled={!adminSecret.trim() || adminLoading}
+              style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.15)" }}
+            >
+              Reveal
+            </button>
+          </div>
+
+          {adminMsg && (
+            <p style={{ marginTop: 10, color: adminMsg.includes("✅") ? "inherit" : "crimson", whiteSpace: "pre-wrap" }}>
+              {adminMsg}
+            </p>
+          )}
+
+          <p style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
+            Tipp: Ohne <code>?admin=1</code> wird dieser Admin-Block gar nicht gerendert (Teilnehmer sehen ihn nicht).
+          </p>
+        </section>
+      )}
 
       {/* RANKING */}
       {!!summary && (
         <section style={{ marginTop: 18 }}>
-          <h2 style={{ fontSize: 16, marginBottom: 10 }}>Ranking</h2>
+          <h2 style={{ fontSize: 16, marginBottom: 10 }}>Ranking (nach Ø Gesamt)</h2>
 
           {summary.ranking?.length ? (
             <div style={{ overflowX: "auto", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10 }}>
@@ -246,6 +329,7 @@ export default function TastingResultPage({ params }: { params: { slug: string }
                 <tbody>
                   {summary.ranking.map((r, idx) => {
                     const w = winesByBlind.get(r.blindNumber);
+
                     const wineTitle = revealed
                       ? [
                           w?.ownerName ? `(${w.ownerName})` : null,
@@ -286,16 +370,19 @@ export default function TastingResultPage({ params }: { params: { slug: string }
         </section>
       )}
 
-      {/* ALLE WEINE (auch ohne Ranking) */}
+      {/* ALLE WEINE */}
       {!!summary && (
         <section style={{ marginTop: 18 }}>
-          <h2 style={{ fontSize: 16, marginBottom: 10 }}>Alle Weine</h2>
+          <h2 style={{ fontSize: 16, marginBottom: 10 }}>
+            Alle Weine {hasServeOrder ? "(Sortierung: Serve-Order)" : "(Sortierung: Blindnummer)"}
+          </h2>
 
           <div style={{ overflowX: "auto", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 780 }}>
               <thead>
                 <tr style={{ background: "rgba(0,0,0,0.04)" }}>
-                  <th style={{ textAlign: "left", padding: 10 }}>Blind #</th>
+                  <th style={{ textAlign: "left", padding: 10, width: 90 }}>Blind #</th>
+                  {hasServeOrder && <th style={{ textAlign: "right", padding: 10, width: 90 }}>Serve</th>}
                   <th style={{ textAlign: "left", padding: 10 }}>Details (nach Reveal)</th>
                   {criteriaLabels.map((label) => (
                     <th key={label} style={{ textAlign: "right", padding: 10 }}>{label}</th>
@@ -304,8 +391,9 @@ export default function TastingResultPage({ params }: { params: { slug: string }
                 </tr>
               </thead>
               <tbody>
-                {summary.rows.map((r) => {
+                {rowsOrderedForDisplay.map((r) => {
                   const w = winesByBlind.get(r.blindNumber);
+
                   const details = revealed
                     ? [
                         w?.ownerName ? `Owner: ${w.ownerName}` : null,
@@ -319,11 +407,18 @@ export default function TastingResultPage({ params }: { params: { slug: string }
 
                   return (
                     <tr key={r.blindNumber} style={{ borderTop: "1px solid rgba(0,0,0,0.08)" }}>
-                      <td style={{ padding: 10, width: 90 }}>
+                      <td style={{ padding: 10 }}>
                         <b>{r.blindNumber}</b>
                       </td>
+
+                      {hasServeOrder && (
+                        <td style={{ padding: 10, textAlign: "right" }}>
+                          {typeof w?.serveOrder === "number" ? w.serveOrder : "—"}
+                        </td>
+                      )}
+
                       <td style={{ padding: 10, opacity: revealed ? 0.9 : 0.6 }}>
-                        {details || (revealed ? "—" : "—")}
+                        {details || "—"}
                       </td>
 
                       {criteriaLabels.map((label) => (
@@ -343,8 +438,8 @@ export default function TastingResultPage({ params }: { params: { slug: string }
           </div>
 
           <p style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-            Tipp: Wenn „Details“ nach Reveal noch leer sind, fehlen noch winery/grape/vintage/ownerName in Firestore
-            (Admin-UI kommt als nächster Schritt).
+            Hinweis: Weindetails erscheinen nur nach <b>Reveal</b>. Serve-Order ist optional und wird nur angezeigt, wenn mindestens
+            ein Wein eine Serve-Order hat.
           </p>
         </section>
       )}
