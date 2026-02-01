@@ -1,65 +1,62 @@
 "use client";
 
-import { useMemo } from "react";
+export const dynamic = "force-dynamic";
+
 import { useSearchParams } from "next/navigation";
 
-function encode(s: string) {
-  return encodeURIComponent(s);
-}
-
 export default function PrintQrPage() {
-  const sp = useSearchParams();
-  const slug = String(sp.get("slug") ?? "").trim();
+  const searchParams = useSearchParams();
+  const slug = String(searchParams.get("slug") ?? "").trim();
 
-  const joinUrl = useMemo(() => {
-    if (!slug) return "";
-    return `https://weinfreunde-app.vercel.app/join?slug=${encode(slug)}`;
-  }, [slug]);
+  if (!slug) {
+    return (
+      <main style={{ padding: 40, fontFamily: "system-ui" }}>
+        <h1>QR-Code drucken</h1>
+        <p style={{ color: "crimson" }}>Fehlender publicSlug</p>
+      </main>
+    );
+  }
 
-  const qrUrl = useMemo(() => {
-    if (!joinUrl) return "";
-    // Für Druck deutlich größer:
-    return `https://api.qrserver.com/v1/create-qr-code/?size=700x700&data=${encode(joinUrl)}`;
-  }, [joinUrl]);
+  const joinUrl = `https://weinfreunde-app.vercel.app/join?slug=${encodeURIComponent(slug)}`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=${encodeURIComponent(joinUrl)}`;
 
   return (
-    <main style={{ padding: 24, fontFamily: "system-ui" }}>
-      <div style={{ maxWidth: 900, margin: "0 auto" }}>
-        <h1 style={{ marginTop: 0 }}>Weinfreunde · Join</h1>
+    <main
+      style={{
+        padding: 40,
+        fontFamily: "system-ui",
+        textAlign: "center",
+      }}
+    >
+      <h1 style={{ marginBottom: 12 }}>Weinfreunde Tasting</h1>
 
-        {!slug ? (
-          <p>Fehler: Missing slug</p>
-        ) : (
-          <>
-            <p style={{ fontSize: 16, marginBottom: 10 }}>
-              Scanne den QR-Code und registriere dich mit Vorname + PIN.
-            </p>
+      <p style={{ marginTop: 0, opacity: 0.8 }}>
+        Teilnehmer scannen den QR-Code oder öffnen:
+      </p>
 
-            <div style={{ display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
-              <img src={qrUrl} alt="QR Code" width={360} height={360} />
+      <p style={{ fontSize: 18, marginBottom: 20 }}>
+        <strong>{joinUrl}</strong>
+      </p>
 
-              <div style={{ minWidth: 280 }}>
-                <div style={{ fontSize: 14, opacity: 0.8 }}>Link:</div>
-                <div style={{ marginTop: 6, wordBreak: "break-all" }}>
-                  <code>{joinUrl}</code>
-                </div>
+      <img
+        src={qrUrl}
+        alt="QR Code"
+        width={360}
+        height={360}
+        style={{ border: "2px solid #000", padding: 12 }}
+      />
 
-                <div style={{ marginTop: 18 }}>
-                  <button
-                    onClick={() => window.print()}
-                    style={{ padding: "12px 14px", fontSize: 16 }}
-                  >
-                    Drucken
-                  </button>
-                </div>
-
-                <p style={{ marginTop: 14, fontSize: 12, opacity: 0.7 }}>
-                  Tipp: Im Druckdialog „Hintergrundgrafiken“ aktivieren (falls nötig).
-                </p>
-              </div>
-            </div>
-          </>
-        )}
+      <div style={{ marginTop: 30 }}>
+        <button
+          onClick={() => window.print()}
+          style={{
+            padding: "12px 20px",
+            fontSize: 16,
+            cursor: "pointer",
+          }}
+        >
+          Drucken
+        </button>
       </div>
     </main>
   );
