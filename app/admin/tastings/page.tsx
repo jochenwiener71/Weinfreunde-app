@@ -24,7 +24,10 @@ export default function AdminTastingsPage() {
 
   // Restore secret from localStorage (optional but practical)
   useEffect(() => {
-    const saved = typeof window !== "undefined" ? window.localStorage.getItem("WF_ADMIN_SECRET") : null;
+    const saved =
+      typeof window !== "undefined"
+        ? window.localStorage.getItem("WF_ADMIN_SECRET")
+        : null;
     if (saved) setAdminSecret(saved);
   }, []);
 
@@ -86,7 +89,7 @@ export default function AdminTastingsPage() {
           />
         </label>
 
-        <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+        <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
           <button
             onClick={load}
             disabled={!canLoad || loading}
@@ -125,7 +128,12 @@ export default function AdminTastingsPage() {
         </div>
 
         {msg && (
-          <p style={{ marginTop: 12, color: msg.includes("✅") ? "inherit" : "crimson" }}>
+          <p
+            style={{
+              marginTop: 12,
+              color: msg.includes("✅") ? "inherit" : "crimson",
+            }}
+          >
             {msg}
           </p>
         )}
@@ -145,55 +153,81 @@ export default function AdminTastingsPage() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ textAlign: "left" }}>
-                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Slug</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Titel</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Host</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Status</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Weine</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Gäste</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Aktionen</th>
+                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>
+                    Slug
+                  </th>
+                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>
+                    Titel
+                  </th>
+                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>
+                    Host
+                  </th>
+                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>
+                    Status
+                  </th>
+                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>
+                    Weine
+                  </th>
+                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>
+                    Gäste
+                  </th>
+                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>
+                    Aktionen
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {items.map((t) => (
-                  <tr key={t.id}>
-                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
-                      <code>{t.publicSlug}</code>
-                    </td>
-                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
-                      {t.title || <span style={{ opacity: 0.6 }}>(ohne Titel)</span>}
-                    </td>
-                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
-                      {t.hostName || <span style={{ opacity: 0.6 }}>(-)</span>}
-                    </td>
-                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
-                      <code>{t.status || "-"}</code>
-                    </td>
-                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
-                      {t.wineCount ?? "-"}
-                    </td>
-                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
-                      {t.maxParticipants ?? "-"}
-                    </td>
-                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
-                      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                        <Link href={`/admin/tastings/${encodeURIComponent(t.publicSlug)}`}>
-                          Verwalten
-                        </Link>
-                        <Link href={`/admin/wines?publicSlug=${encodeURIComponent(t.publicSlug)}`}>
-                          Weine
-                        </Link>
-                        <a
-                          href={`/join?slug=${encodeURIComponent(t.publicSlug)}`}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Join-Link
-                        </a>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {items.map((t) => {
+                  const slug = t.publicSlug;
+                  const encoded = encodeURIComponent(slug);
+
+                  // Deine Manage-Seite: /admin/tastings/[publicSlug]
+                  const manageBase = `/admin/tastings/${encoded}`;
+
+                  return (
+                    <tr key={t.id}>
+                      <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                        <code>{t.publicSlug}</code>
+                      </td>
+
+                      <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                        {t.title || <span style={{ opacity: 0.6 }}>(ohne Titel)</span>}
+                      </td>
+
+                      <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                        {t.hostName || <span style={{ opacity: 0.6 }}>(-)</span>}
+                      </td>
+
+                      <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                        <code>{t.status || "-"}</code>
+                      </td>
+
+                      <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                        {t.wineCount ?? "-"}
+                      </td>
+
+                      <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                        {t.maxParticipants ?? "-"}
+                      </td>
+
+                      <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                          <Link href={manageBase}>Verwalten</Link>
+
+                          {/* ✅ NEU: Direktlinks */}
+                          <Link href={`${manageBase}#participants`}>Teilnehmer</Link>
+                          <Link href={`${manageBase}#criteria`}>Kategorien</Link>
+
+                          <Link href={`/admin/wines?publicSlug=${encoded}`}>Weine</Link>
+
+                          <a href={`/join?slug=${encoded}`} target="_blank" rel="noreferrer">
+                            Join-Link
+                          </a>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
