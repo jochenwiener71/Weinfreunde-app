@@ -1,23 +1,24 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/firebaseAdmin";
+import { db } from "../../../lib/firebaseAdmin";
 
-type Criterion = { id: string; label: string; order?: number };
+type Criterion = { id: string; label: string; order: number };
 
-function toNum(x: any): number | null {
-  const n = Number(x);
-  return Number.isFinite(n) ? n : null;
-}
+type SummaryRow = {
+  blindNumber: number;
+  perCrit: Record<string, number | null>;
+  overall: number | null;
+};
 
 export async function GET(req: Request) {
   try {
-    const url = new URL(req.url);
-    const publicSlug = String(url.searchParams.get("publicSlug") ?? "").trim();
+    const { searchParams } = new URL(req.url);
+    const publicSlug = String(searchParams.get("publicSlug") ?? "").trim();
 
     if (!publicSlug) {
       return NextResponse.json({ error: "Missing publicSlug" }, { status: 400 });
     }
 
-    // Find tasting
+    // find tasting
     const tSnap = await db()
       .collection("tastings")
       .where("publicSlug", "==", publicSlug)
@@ -29,158 +30,123 @@ export async function GET(req: Request) {
     }
 
     const tDoc = tSnap.docs[0];
-    const tRef = tDoc.ref;
-    const tData: any = tDoc.data();
+    const tastingId = tDoc.id;
+    const t = tDoc.data() as any;
 
-    const status = String(tData?.status ?? "draft");
-    const wineCountRaw = Number(tData?.wineCount ?? 0);
+    // criteria
+    const cSnap = await db()
+      .collection("tastings")
+      .doc(tastingId)
+      .collection("criteria")
+      .get();
 
-    // Criteria
-    const cSnap = await tRef.collection("criteria").orderBy("order", "asc").get();
     const criteria: Criterion[] = cSnap.docs
       .map((d) => {
-        const data: any = d.data();
+        const cd = d.data() as any;
         return {
           id: d.id,
-          label: String(data?.label ?? "").trim(),
-          order: Number(data?.order ?? 0),
+          label: String(cd.label ?? d.id),
+          order: typeof cd.order === "number" ? cd.order : 999,
         };
       })
-      .filter((c) => c.label.length > 0);
+      .sort((a, b) => a.order - b.order);
 
-    // Wines: map wineId -> blindNumber and collect meta by blindNumber
-    const wSnap = await tRef.collection("wines").get();
-    const wineIdToBlind: Record<string, number> = {};
-    const wineMetaByBlind: Record<
-      number,
-      {
-        wineId: string;
-        blindNumber: number;
-        displayName: string | null;
-        winery: string | null;
-        grape: string | null;
-        vintage: string | number | null;
-        ownerName: string | null;
-        serveOrder: string | null;
-      }
-    > = {};
+    // wines (for blind numbers)
+    const wSnap = await db()
+      .collection("tastings")
+      .doc(tastingId)
+      .collection("wines")
+      .get();
 
-    for (const w of wSnap.docs) {
-      const wd: any = w.data();
-      const blind = toNum(wd?.blindNumber) ?? toNum(wd?.number) ?? null;
-      if (blind === null) continue;
+    const wineCount = typeof t.wineCount === "number" ? t.wineCount : wSnap.size;
 
-      wineIdToBlind[w.id] = blind;
-      wineMetaByBlind[blind] = {
-        wineId: w.id,
-        blindNumber: blind,
-        displayName: wd?.displayName ?? wd?.name ?? null,
-        winery: wd?.winery ?? null,
-        grape: wd?.grape ?? null,
-        vintage: wd?.vintage ?? null,
-        ownerName: wd?.ownerName ?? null,
-        serveOrder: (typeof wd?.serveOrder === "number" ? wd.serveOrder : null),
-      };
-    }
-
-    if (status !== "revealed") {
-      // Return minimal response even before reveal, but include wineCount/criteria
-      const maxWine =
-        Number.isFinite(wineCountRaw) && wineCountRaw > 0
-          ? wineCountRaw
-          : Math.max(0, ...Object.values(wineIdToBlind));
-
-      return NextResponse.json({
-        ok: true,
-        publicSlug,
-        tastingId: tRef.id,
-        status,
-        wineCount: maxWine,
-        criteria,
-        rows: Array.from({ length: maxWine }, (_, i) => ({
-          blindNumber: i + 1,
-          wine: wineMetaByBlind[i + 1] ?? null,
-          perCrit: Object.fromEntries(criteria.map((c) => [c.label, null])),
-          overall: null,
-        })),
-        ranking: [],
-        ratingCount: 0,
-      });
-    }
-
-    // Ratings
-    const rSnap = await tRef.collection("ratings").get();
-
-    const wineAgg: Record<number, Record<string, { sum: number; count: number }>> = {};
-    const wineOverall: Record<number, { sum: number; count: number }> = {};
-
-    function addScore(blind: number, critLabel: string, v: number) {
-      if (!wineAgg[blind]) wineAgg[blind] = {};
-      if (!wineAgg[blind][critLabel]) wineAgg[blind][critLabel] = { sum: 0, count: 0 };
-      wineAgg[blind][critLabel].sum += v;
-      wineAgg[blind][critLabel].count += 1;
-
-      if (!wineOverall[blind]) wineOverall[blind] = { sum: 0, count: 0 };
-      wineOverall[blind].sum += v;
-      wineOverall[blind].count += 1;
-    }
-
-    for (const r of rSnap.docs) {
-      const rd: any = r.data();
-
-      // your schema:
-      const wineId = String(rd?.wineId ?? "").trim();
-      const blind = wineId ? (wineIdToBlind[wineId] ?? null) : null;
-      if (!blind || blind < 1) continue;
-
-      const scores = rd?.scores && typeof rd.scores === "object" ? rd.scores : null;
-      if (!scores) continue;
-
-      // scores keys = criterionId
-      for (const c of criteria) {
-        const v = toNum(scores?.[c.id]);
-        if (v !== null) addScore(blind, c.label, v);
-      }
-    }
-
-    const maxWine =
-      Number.isFinite(wineCountRaw) && wineCountRaw > 0
-        ? wineCountRaw
-        : Math.max(0, ...Object.values(wineIdToBlind));
-
-    const rows = Array.from({ length: maxWine }, (_, i) => i + 1).map((blindNumber) => {
+    // build blind number list (1..wineCount)
+    const rows: SummaryRow[] = Array.from({ length: wineCount }, (_, i) => {
+      const blindNumber = i + 1;
       const perCrit: Record<string, number | null> = {};
-      for (const c of criteria) {
-        const cell = wineAgg?.[blindNumber]?.[c.label];
-        perCrit[c.label] = cell && cell.count > 0 ? cell.sum / cell.count : null;
-      }
-      const o = wineOverall?.[blindNumber];
-      const overall = o && o.count > 0 ? o.sum / o.count : null;
-
-      return {
-        blindNumber,
-        wine: wineMetaByBlind[blindNumber] ?? null,
-        perCrit,
-        overall,
-      };
+      for (const c of criteria) perCrit[c.label] = null;
+      return { blindNumber, perCrit, overall: null };
     });
 
-    const ranking = [...rows]
-      .filter((r) => r.overall !== null)
-      .sort((a, b) => (b.overall! - a.overall!));
+    // ratings
+    const rSnap = await db()
+      .collection("tastings")
+      .doc(tastingId)
+      .collection("ratings")
+      .get();
+
+    // aggregate: blindNumber -> criterionLabel -> values[]
+    const agg: Record<number, Record<string, number[]>> = {};
+
+    for (const doc of rSnap.docs) {
+      const rd = doc.data() as any;
+      const wineId = String(rd.wineId ?? "");
+      if (!wineId) continue;
+
+      // need blindNumber for this wineId
+      const wDoc = wSnap.docs.find((w) => w.id === wineId);
+      const wd = wDoc ? (wDoc.data() as any) : null;
+      const blindNumber = wd && typeof wd.blindNumber === "number" ? wd.blindNumber : null;
+      if (!blindNumber || blindNumber < 1) continue;
+
+      const scores = (rd.scores ?? {}) as Record<string, any>;
+      if (!agg[blindNumber]) agg[blindNumber] = {};
+
+      for (const c of criteria) {
+        const raw = scores[c.id];
+        const val = typeof raw === "number" ? raw : null;
+        if (val == null) continue;
+
+        const label = c.label;
+        if (!agg[blindNumber][label]) agg[blindNumber][label] = [];
+        agg[blindNumber][label].push(val);
+      }
+    }
+
+    // compute averages into rows
+    for (const row of rows) {
+      const bn = row.blindNumber;
+      const per = agg[bn] ?? {};
+
+      let sumOverall = 0;
+      let countOverall = 0;
+
+      for (const c of criteria) {
+        const label = c.label;
+        const vals = per[label] ?? [];
+        if (!vals.length) {
+          row.perCrit[label] = null;
+          continue;
+        }
+        const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+        const rounded = Math.round(avg * 100) / 100;
+        row.perCrit[label] = rounded;
+
+        sumOverall += avg;
+        countOverall += 1;
+      }
+
+      row.overall =
+        countOverall > 0 ? Math.round((sumOverall / countOverall) * 100) / 100 : null;
+    }
+
+    const ranking = rows
+      .filter((r) => typeof r.overall === "number")
+      .slice()
+      .sort((a, b) => (b.overall ?? -999) - (a.overall ?? -999));
 
     return NextResponse.json({
       ok: true,
       publicSlug,
-      tastingId: tRef.id,
-      status,
-      wineCount: maxWine,
-      criteria,
+      tastingId,
+      status: t.status ?? null,
+      wineCount,
+      criteria: criteria.map((c) => ({ id: c.id, label: c.label, order: c.order })),
       rows,
       ranking,
       ratingCount: rSnap.size,
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Summary failed" }, { status: 500 });
+    return NextResponse.json({ error: e?.message ?? "Error" }, { status: 500 });
   }
 }
