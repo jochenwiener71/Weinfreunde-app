@@ -3,17 +3,22 @@
 import { useEffect, useMemo, useState } from "react";
 
 type PublicData = {
-  tasting: { title: string; hostName: string; status: string; wineCount?: number | null };
+  tasting: {
+    title: string;
+    hostName: string;
+    status: string;
+    wineCount: number;
+  };
   criteria: { id: string; label: string; scaleMin: number; scaleMax: number; order: number }[];
-  // optional: falls deine API schon Weindetails liefert
   wine?: {
-    blindNumber?: number | null;
+    id: string;
+    blindNumber: number | null;
+    isActive?: boolean;
+    displayName?: string | null;
     winery?: string | null;
     grape?: string | null;
     vintage?: string | null;
-    ownerName?: string | null;
-    displayName?: string | null;
-  };
+  } | null;
 };
 
 export default function WineRatePage({
@@ -30,46 +35,72 @@ export default function WineRatePage({
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // load public data (tasting + criteria + optional wine info)
   useEffect(() => {
     (async () => {
+      setMsg(null);
       try {
-        setMsg(null);
-        const res = await fetch(`/api/tasting/public?slug=${encodeURIComponent(slug)}`, { cache: "no-store" });
+        const res = await fetch(
+          `/api/tasting/public?slug=${encodeURIComponent(slug)}&blindNumber=${encodeURIComponent(
+            String(blindNumber)
+          )}`
+        );
         const json = await res.json();
         if (!res.ok) throw new Error(json?.error ?? "Load failed");
 
-        // optional: wenn deine public API nur tasting/criteria liefert ist das ok
-        const payload: PublicData = {
-          tasting: json.tasting,
-          criteria: json.criteria,
-          wine: json.wine ?? undefined,
-        };
+        setData({
+          tasting: {
+            title: String(json?.tasting?.title ?? ""),
+            hostName: String(json?.tasting?.hostName ?? ""),
+            status: String(json?.tasting?.status ?? ""),
+            wineCount: Number(json?.tasting?.wineCount ?? 10),
+          },
+          criteria: Array.isArray(json?.criteria) ? json.criteria : [],
+          wine: json?.wine ?? null,
+        });
 
-        setData(payload);
+        // Optional: Scores initialisieren (damit Slider nicht "springen")
+        const initial: Record<string, number> = {};
+        for (const c of (Array.isArray(json?.criteria) ? json.criteria : []) as any[]) {
+          const id = String(c.id ?? "");
+          const min = typeof c.scaleMin === "number" ? c.scaleMin : 1;
+          if (id) initial[id] = min;
+        }
+        setScores((prev) => (Object.keys(prev).length ? prev : initial));
       } catch (e: any) {
         setMsg(e?.message ?? "Load failed");
       }
     })();
-  }, [slug]);
+  }, [slug, blindNumber]);
 
   const orderedCriteria = useMemo(
     () => (data?.criteria ?? []).slice().sort((a, b) => a.order - b.order),
     [data]
   );
 
-  // defaults: wenn noch nichts gewählt, setze auf scaleMin
-  useEffect(() => {
-    if (!orderedCriteria.length) return;
-    setScores((prev) => {
-      const next = { ...prev };
-      for (const c of orderedCriteria) {
-        if (typeof next[c.id] !== "number") next[c.id] = c.scaleMin;
-      }
-      return next;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderedCriteria.length]);
+  const wineCount = data?.tasting?.wineCount ?? 10;
+  const prevBn = blindNumber - 1;
+  const nextBn = blindNumber + 1;
+
+  const canGoPrev = prevBn >= 1;
+  const canGoNext = nextBn <= wineCount;
+
+  const wineTitleLine = useMemo(() => {
+    const w = data?.wine ?? null;
+    if (!w) return null;
+
+    const parts: string[] = [];
+    const winery = typeof w.winery === "string" && w.winery.trim() ? w.winery.trim() : "";
+    const name = typeof w.displayName === "string" && w.displayName.trim() ? w.displayName.trim() : "";
+    const grape = typeof w.grape === "string" && w.grape.trim() ? w.grape.trim() : "";
+    const vintage = typeof w.vintage === "string" && w.vintage.trim() ? w.vintage.trim() : "";
+
+    if (winery) parts.push(winery);
+    if (name) parts.push(name);
+    if (grape) parts.push(grape);
+    if (vintage) parts.push(vintage);
+
+    return parts.length ? parts.join(" · ") : null;
+  }, [data]);
 
   async function save() {
     setMsg(null);
@@ -90,27 +121,9 @@ export default function WineRatePage({
     }
   }
 
-  const wineCount = Number(data?.tasting?.wineCount ?? 0) || undefined;
-  const prevHref = blindNumber > 1 ? `/t/${encodeURIComponent(slug)}/wine/${blindNumber - 1}` : null;
-  const nextHref = wineCount
-    ? blindNumber < wineCount
-      ? `/t/${encodeURIComponent(slug)}/wine/${blindNumber + 1}`
-      : null
-    : `/t/${encodeURIComponent(slug)}/wine/${blindNumber + 1}`; // fallback ohne Limit
-
-  const wineTitleLine = useMemo(() => {
-    const w = data?.wine;
-    const parts: string[] = [];
-    if (w?.winery) parts.push(w.winery);
-    if (w?.displayName) parts.push(w.displayName);
-    if (w?.grape) parts.push(w.grape);
-    if (w?.vintage) parts.push(w.vintage);
-    return parts.join(" · ");
-  }, [data?.wine]);
-
   return (
     <div style={pageStyle}>
-      {/* Background */}
+      {/* Background wie Join */}
       <div
         style={{
           position: "absolute",
@@ -131,111 +144,108 @@ export default function WineRatePage({
         }}
       />
 
-      {/* Content */}
       <div style={centerWrapStyle}>
         <div style={cardStyle}>
-          {/* Top nav */}
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 14 }}>
+          {/* Top Nav */}
+          <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
             <a href={`/t/${encodeURIComponent(slug)}`} style={ghostLinkStyle}>
               ← Übersicht
             </a>
 
-            <div style={{ display: "flex", gap: 8 }}>
-              {prevHref ? (
-                <a href={prevHref} style={ghostLinkStyle}>
-                  ← Wein {blindNumber - 1}
-                </a>
-              ) : (
-                <span style={{ ...ghostLinkStyle, opacity: 0.35, cursor: "default" }}>← Zurück</span>
-              )}
+            <div style={{ flex: 1 }} />
 
-              {nextHref ? (
-                <a href={nextHref} style={ghostLinkStyle}>
-                  Wein {blindNumber + 1} →
-                </a>
-              ) : (
-                <span style={{ ...ghostLinkStyle, opacity: 0.35, cursor: "default" }}>Weiter →</span>
-              )}
-            </div>
+            <a
+              href={canGoPrev ? `/t/${encodeURIComponent(slug)}/wine/${prevBn}` : "#"}
+              onClick={(e) => {
+                if (!canGoPrev) e.preventDefault();
+              }}
+              style={{
+                ...navBtnStyle,
+                opacity: canGoPrev ? 1 : 0.45,
+                pointerEvents: canGoPrev ? "auto" : "none",
+              }}
+            >
+              ← Zurück
+            </a>
+            <a
+              href={canGoNext ? `/t/${encodeURIComponent(slug)}/wine/${nextBn}` : "#"}
+              onClick={(e) => {
+                if (!canGoNext) e.preventDefault();
+              }}
+              style={{
+                ...navBtnStyle,
+                opacity: canGoNext ? 1 : 0.45,
+                pointerEvents: canGoNext ? "auto" : "none",
+              }}
+            >
+              Weiter →
+            </a>
           </div>
 
-          <h1 style={h1Style}>🍷 Wein #{blindNumber} bewerten</h1>
+          <h1 style={h1Style}>Wein #{blindNumber} bewerten</h1>
 
           {data && (
             <p style={subStyle}>
               {data.tasting.title} · {data.tasting.hostName}
-              {typeof wineCount === "number" && wineCount > 0 ? (
-                <span style={{ opacity: 0.7 }}> · {blindNumber}/{wineCount}</span>
-              ) : null}
             </p>
           )}
 
-          {/* Optional wine details line (works if API provides it) */}
-          {wineTitleLine ? (
-            <div style={wineMetaBoxStyle}>
-              <div style={{ fontWeight: 800, marginBottom: 4 }}>Details</div>
-              <div style={{ opacity: 0.9, lineHeight: 1.35 }}>{wineTitleLine}</div>
+          {/* Wein-Details */}
+          {wineTitleLine && (
+            <div style={wineInfoStyle}>
+              <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>Wein-Details</div>
+              <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.35 }}>{wineTitleLine}</div>
             </div>
-          ) : null}
+          )}
 
-          {!data && <p style={{ opacity: 0.85 }}>Lade…</p>}
+          {!data && <p style={{ opacity: 0.85 }}>Lade...</p>}
 
-          {/* Criteria sliders */}
-          <div style={{ display: "grid", gap: 14, marginTop: 14 }}>
-            {orderedCriteria.map((c) => {
-              const val = typeof scores[c.id] === "number" ? scores[c.id] : c.scaleMin;
-
-              return (
-                <div key={c.id} style={critBoxStyle}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
-                    <div style={{ fontWeight: 800 }}>
-                      {c.label}{" "}
-                      <span style={{ opacity: 0.7, fontWeight: 600 }}>
-                        ({c.scaleMin}–{c.scaleMax})
-                      </span>
-                    </div>
-                    <div style={badgeStyle}>{val}</div>
+          {orderedCriteria.map((c) => {
+            const current = scores[c.id] ?? c.scaleMin;
+            return (
+              <div key={c.id} style={critWrapStyle}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                  <div style={{ fontWeight: 800 }}>
+                    {c.label}{" "}
+                    <span style={{ fontWeight: 500, opacity: 0.7 }}>
+                      ({c.scaleMin}–{c.scaleMax})
+                    </span>
                   </div>
-
-                  <input
-                    type="range"
-                    min={c.scaleMin}
-                    max={c.scaleMax}
-                    value={val}
-                    onChange={(e) => setScores((s) => ({ ...s, [c.id]: Number(e.target.value) }))}
-                    style={{ width: "100%", marginTop: 10 }}
-                  />
-
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, opacity: 0.75 }}>
-                    <span>{c.scaleMin}</span>
-                    <span>{c.scaleMax}</span>
-                  </div>
+                  <div style={{ fontWeight: 800, opacity: 0.95 }}>{current}</div>
                 </div>
-              );
-            })}
-          </div>
 
-          {/* Comment */}
+                <input
+                  type="range"
+                  min={c.scaleMin}
+                  max={c.scaleMax}
+                  value={current}
+                  onChange={(e) =>
+                    setScores((s) => ({ ...s, [c.id]: Number(e.target.value) }))
+                  }
+                  style={{ width: "100%", marginTop: 10 }}
+                />
+              </div>
+            );
+          })}
+
           <div style={{ marginTop: 16 }}>
-            <div style={{ marginBottom: 8, fontWeight: 800 }}>Kommentar (optional)</div>
+            <div style={{ marginBottom: 6, fontWeight: 800 }}>Kommentar (optional)</div>
             <textarea
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               rows={3}
               style={textareaStyle}
-              placeholder="z.B. fruchtig, gute Balance, langer Abgang…"
+              placeholder="Kurznotiz (z.B. Kräuter, Säure, Tannin …)"
             />
           </div>
 
-          {/* Save */}
           <button
             onClick={save}
             disabled={loading}
             style={{
-              ...buttonStyle,
-              opacity: loading ? 0.7 : 1,
+              ...primaryBtnStyle,
+              opacity: loading ? 0.75 : 1,
               cursor: loading ? "not-allowed" : "pointer",
-              marginTop: 14,
             }}
           >
             {loading ? "Speichere..." : "Bewertung speichern"}
@@ -248,7 +258,7 @@ export default function WineRatePage({
           )}
 
           <p style={footerStyle}>
-            Tipp: Du kannst jederzeit zwischen Weinen springen – gespeicherte Bewertungen bleiben erhalten.
+            Tipp: Du kannst direkt mit „Weiter“ zum nächsten Wein springen.
           </p>
         </div>
       </div>
@@ -256,7 +266,7 @@ export default function WineRatePage({
   );
 }
 
-/* Styles */
+/* Styles (wie Join: Card + Background) */
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
   position: "relative",
@@ -276,11 +286,11 @@ const centerWrapStyle: React.CSSProperties = {
 
 const cardStyle: React.CSSProperties = {
   width: "100%",
-  maxWidth: 560,
-  background: "rgba(20,20,20,0.75)",
+  maxWidth: 520,
+  background: "rgba(20,20,20,0.78)",
   backdropFilter: "blur(6px)",
   borderRadius: 16,
-  padding: 22,
+  padding: 24,
   boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
   color: "white",
 };
@@ -289,55 +299,44 @@ const h1Style: React.CSSProperties = {
   marginTop: 0,
   marginBottom: 8,
   fontSize: 24,
-  textAlign: "center",
+  textAlign: "left",
   letterSpacing: 0.2,
 };
 
 const subStyle: React.CSSProperties = {
-  textAlign: "center",
-  opacity: 0.85,
   marginTop: 0,
-  marginBottom: 10,
+  marginBottom: 14,
+  opacity: 0.85,
 };
 
-const wineMetaBoxStyle: React.CSSProperties = {
-  background: "rgba(255,255,255,0.08)",
-  border: "1px solid rgba(255,255,255,0.12)",
+const wineInfoStyle: React.CSSProperties = {
   borderRadius: 12,
   padding: 12,
-  marginTop: 10,
+  background: "rgba(255,255,255,0.10)",
+  border: "1px solid rgba(255,255,255,0.14)",
+  marginBottom: 14,
 };
 
-const critBoxStyle: React.CSSProperties = {
-  background: "rgba(255,255,255,0.08)",
-  border: "1px solid rgba(255,255,255,0.12)",
+const critWrapStyle: React.CSSProperties = {
+  marginTop: 12,
   borderRadius: 12,
   padding: 12,
-};
-
-const badgeStyle: React.CSSProperties = {
-  minWidth: 42,
-  textAlign: "center",
-  padding: "6px 10px",
-  borderRadius: 999,
-  fontWeight: 900,
-  background: "rgba(255,255,255,0.14)",
-  border: "1px solid rgba(255,255,255,0.18)",
+  background: "rgba(255,255,255,0.08)",
+  border: "1px solid rgba(255,255,255,0.12)",
 };
 
 const textareaStyle: React.CSSProperties = {
   width: "100%",
-  padding: 12,
+  padding: 10,
   borderRadius: 12,
-  border: "1px solid rgba(255,255,255,0.14)",
-  outline: "none",
-  fontSize: 15,
+  border: "1px solid rgba(255,255,255,0.18)",
   background: "rgba(0,0,0,0.25)",
   color: "white",
-  resize: "vertical",
+  outline: "none",
 };
 
-const buttonStyle: React.CSSProperties = {
+const primaryBtnStyle: React.CSSProperties = {
+  marginTop: 16,
   width: "100%",
   padding: "12px 14px",
   borderRadius: 10,
@@ -348,15 +347,25 @@ const buttonStyle: React.CSSProperties = {
   fontWeight: 800,
 };
 
-const ghostLinkStyle: React.CSSProperties = {
-  display: "inline-block",
+const navBtnStyle: React.CSSProperties = {
   textDecoration: "none",
   color: "white",
-  fontWeight: 700,
-  background: "rgba(255,255,255,0.10)",
-  border: "1px solid rgba(255,255,255,0.14)",
-  padding: "8px 10px",
+  fontWeight: 800,
+  padding: "10px 12px",
   borderRadius: 10,
+  background: "rgba(255,255,255,0.12)",
+  border: "1px solid rgba(255,255,255,0.16)",
+};
+
+const ghostLinkStyle: React.CSSProperties = {
+  textDecoration: "none",
+  color: "white",
+  opacity: 0.9,
+  fontWeight: 700,
+  padding: "10px 12px",
+  borderRadius: 10,
+  background: "rgba(255,255,255,0.06)",
+  border: "1px solid rgba(255,255,255,0.10)",
 };
 
 const footerStyle: React.CSSProperties = {
