@@ -1,50 +1,27 @@
 import { NextResponse } from "next/server";
 import admin from "firebase-admin";
 import { db } from "@/lib/firebaseAdmin";
-import { requireAdminSecret } from "@/lib/security";
 
-async function findTasting(body: any) {
-  const tastingId = String(body?.tastingId ?? "").trim();
-  const publicSlug = String(body?.publicSlug ?? "").trim();
-
-  if (tastingId) {
-    const ref = db().collection("tastings").doc(tastingId);
-    const snap = await ref.get();
-    if (!snap.exists) return null;
-    return { ref, id: snap.id, data: snap.data() };
+function requireAdminSecret(req: Request) {
+  const expected = String(process.env.ADMIN_SECRET ?? "").trim();
+  const provided = req.headers.get("x-admin-secret") || req.headers.get("X-Admin-Secret") || "";
+  if (!expected) throw new Error("ADMIN_SECRET is not set in this deployment.");
+  if (!provided || String(provided).trim() !== expected) {
+    const err: any = new Error("Forbidden");
+    err.status = 403;
+    throw err;
   }
-
-  if (publicSlug) {
-    const q = await db().collection("tastings").where("publicSlug", "==", publicSlug).limit(1).get();
-    if (q.empty) return null;
-    return { ref: q.docs[0].ref, id: q.docs[0].id, data: q.docs[0].data() };
-  }
-
-  return null;
 }
 
-async function deleteCollection(ref: admin.firestore.CollectionReference, batchSize = 250) {
-  let deleted = 0;
-
+async function deleteSubcollection(ref: admin.firestore.DocumentReference, sub: string) {
+  const col = ref.collection(sub);
   while (true) {
-    const snap = await ref
-      .orderBy(admin.firestore.FieldPath.documentId())
-      .limit(batchSize)
-      .get();
-
+    const snap = await col.limit(200).get();
     if (snap.empty) break;
-
     const batch = db().batch();
-    for (const doc of snap.docs) batch.delete(doc.ref);
+    snap.docs.forEach((d) => batch.delete(d.ref));
     await batch.commit();
-
-    deleted += snap.size;
-
-    // safety: if less than batchSize, we're done
-    if (snap.size < batchSize) break;
   }
-
-  return deleted;
 }
 
 export async function POST(req: Request) {
@@ -52,31 +29,35 @@ export async function POST(req: Request) {
     requireAdminSecret(req);
 
     const body = await req.json().catch(() => ({}));
+    const publicSlug = String(body?.publicSlug ?? "").trim();
+    const tastingId = String(body?.tastingId ?? "").trim();
 
-    const found = await findTasting(body);
-    if (!found) {
-      return NextResponse.json({ error: "Tasting not found" }, { status: 404 });
+    let ref: admin.firestore.DocumentReference | null = null;
+
+    if (tastingId) {
+      ref = db().collection("tastings").doc(tastingId);
+      const s = await ref.get();
+      if (!s.exists) return NextResponse.json({ error: "Tasting not found" }, { status: 404 });
+    } else if (publicSlug) {
+      const q = await db().collection("tastings").where("publicSlug", "==", publicSlug).limit(1).get();
+      if (q.empty) return NextResponse.json({ error: "Tasting not found" }, { status: 404 });
+      ref = q.docs[0].ref;
+    } else {
+      return NextResponse.json({ error: "Missing publicSlug or tastingId" }, { status: 400 });
     }
 
-    const tastingRef = found.ref;
+    // known subcollections
+    await deleteSubcollection(ref!, "wines");
+    await deleteSubcollection(ref!, "criteria");
+    await deleteSubcollection(ref!, "ratings");
+    await deleteSubcollection(ref!, "participants");
+    await deleteSubcollection(ref!, "reports");
 
-    // delete subcollections
-    const deletedCounts: Record<string, number> = {};
+    await ref!.delete();
 
-    deletedCounts.criteria = await deleteCollection(tastingRef.collection("criteria"));
-    deletedCounts.wines = await deleteCollection(tastingRef.collection("wines"));
-    deletedCounts.ratings = await deleteCollection(tastingRef.collection("ratings"));
-    deletedCounts.participants = await deleteCollection(tastingRef.collection("participants"));
-
-    // finally delete tasting doc
-    await tastingRef.delete();
-
-    return NextResponse.json({
-      ok: true,
-      tastingId: found.id,
-      deletedCounts,
-    });
+    return NextResponse.json({ ok: true });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Delete failed" }, { status: 500 });
+    const status = Number(e?.status ?? 500);
+    return NextResponse.json({ error: e?.message ?? "Error" }, { status });
   }
 }
