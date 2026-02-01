@@ -27,11 +27,13 @@ export default function JoinClient() {
     setLoading(true);
 
     try {
+      const cleanSlug = slug.trim();
+
       const res = await fetch("/api/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          slug: slug.trim(),
+          slug: cleanSlug,
           pin: pin.trim(),
           alias: alias.trim(),
         }),
@@ -47,10 +49,11 @@ export default function JoinClient() {
 
       if (!res.ok) throw new Error(data?.error ? String(data.error) : `HTTP ${res.status}`);
 
-      setMsg("Registriert ✅");
+      setMsg("Registriert ✅ — weiterleiten…");
 
-      // Optional: weiterleiten (wenn du z.B. /rate oder /t/[slug] hast, hier anpassen)
-      // router.push(`/t/${encodeURIComponent(slug.trim())}`);
+      // ✅ Redirect auf deine Tasting-Seite (app/t/[slug])
+      router.push(`/t/${encodeURIComponent(cleanSlug)}`);
+      router.refresh();
     } catch (e: any) {
       setMsg(e?.message ?? "Fehler");
     } finally {
@@ -121,7 +124,9 @@ export default function JoinClient() {
       )}
 
       <p style={{ marginTop: 16, fontSize: 12, opacity: 0.7 }}>
-        Tipp: QR-Link sieht so aus: <code>/join?slug=weinfreunde</code>
+        QR-Link: <code>/join?slug=weinfreunde</code>
+        <br />
+        Nach Join geht’s weiter zu: <code>/t/{"{slug}"}</code>
       </p>
     </main>
   );
