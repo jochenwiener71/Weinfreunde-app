@@ -15,7 +15,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid input" }, { status: 400 });
     }
 
-    const q = await db()
+    const q = await getdb()
       .collection("tastings")
       .where("publicSlug", "==", slug)
       .limit(1)
