@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 
 function encode(s: string) {
@@ -17,7 +18,6 @@ export default function AdminPage() {
 
   const qrUrl = useMemo(() => {
     if (!joinUrl) return "";
-    // QR als Bild ohne Library
     return `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encode(joinUrl)}`;
   }, [joinUrl]);
 
@@ -26,7 +26,6 @@ export default function AdminPage() {
       await navigator.clipboard.writeText(text);
       alert("Link kopiert ✅");
     } catch {
-      // iOS/Safari fallback
       prompt("Kopiere den Link:", text);
     }
   }
@@ -43,9 +42,65 @@ export default function AdminPage() {
       <h1 style={{ marginTop: 0 }}>Admin Dashboard</h1>
 
       <p style={{ marginTop: 6, opacity: 0.75 }}>
-        QR-Code generieren für die Teilnehmer-Registrierung (/join).
+        Schnellzugriff: Tastings verwalten, QR-Code erzeugen, Weine pflegen.
       </p>
 
+      {/* ✅ QUICK LINKS / BUTTONS */}
+      <section style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <Link
+          href="/admin/tastings"
+          style={{
+            padding: "10px 12px",
+            border: "1px solid rgba(0,0,0,0.18)",
+            borderRadius: 8,
+            textDecoration: "none",
+            color: "inherit",
+          }}
+        >
+          Tastings verwalten
+        </Link>
+
+        <Link
+          href="/admin/create"
+          style={{
+            padding: "10px 12px",
+            border: "1px solid rgba(0,0,0,0.18)",
+            borderRadius: 8,
+            textDecoration: "none",
+            color: "inherit",
+          }}
+        >
+          Tasting anlegen
+        </Link>
+
+        <Link
+          href="/admin/wines"
+          style={{
+            padding: "10px 12px",
+            border: "1px solid rgba(0,0,0,0.18)",
+            borderRadius: 8,
+            textDecoration: "none",
+            color: "inherit",
+          }}
+        >
+          Weine verwalten
+        </Link>
+
+        <Link
+          href="/admin/reporting"
+          style={{
+            padding: "10px 12px",
+            border: "1px solid rgba(0,0,0,0.18)",
+            borderRadius: 8,
+            textDecoration: "none",
+            color: "inherit",
+          }}
+        >
+          Reporting
+        </Link>
+      </section>
+
+      {/* ✅ QR BOX */}
       <section
         style={{
           marginTop: 18,
@@ -123,49 +178,6 @@ export default function AdminPage() {
             </p>
           </>
         )}
-      </section>
-
-      <hr style={{ marginTop: 18, opacity: 0.2 }} />
-
-      <section style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <a
-          href="/admin/create"
-          style={{
-            padding: "10px 12px",
-            border: "1px solid rgba(0,0,0,0.18)",
-            borderRadius: 8,
-            textDecoration: "none",
-            color: "inherit",
-          }}
-        >
-          Tasting anlegen
-        </a>
-
-        <a
-          href="/admin/wines"
-          style={{
-            padding: "10px 12px",
-            border: "1px solid rgba(0,0,0,0.18)",
-            borderRadius: 8,
-            textDecoration: "none",
-            color: "inherit",
-          }}
-        >
-          Weine verwalten
-        </a>
-
-        <a
-          href="/admin/reporting"
-          style={{
-            padding: "10px 12px",
-            border: "1px solid rgba(0,0,0,0.18)",
-            borderRadius: 8,
-            textDecoration: "none",
-            color: "inherit",
-          }}
-        >
-          Reporting
-        </a>
       </section>
     </main>
   );
