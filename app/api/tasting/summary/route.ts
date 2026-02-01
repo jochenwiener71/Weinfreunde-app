@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "../../../lib/firebaseAdmin";
+import { db } from "@/lib/firebaseAdmin";
 
 type Criterion = { id: string; label: string; order: number };
 
@@ -58,7 +58,8 @@ export async function GET(req: Request) {
       .collection("wines")
       .get();
 
-    const wineCount = typeof t.wineCount === "number" ? t.wineCount : wSnap.size;
+    const wineCount =
+      typeof t.wineCount === "number" ? t.wineCount : wSnap.size;
 
     // build blind number list (1..wineCount)
     const rows: SummaryRow[] = Array.from({ length: wineCount }, (_, i) => {
@@ -83,10 +84,11 @@ export async function GET(req: Request) {
       const wineId = String(rd.wineId ?? "");
       if (!wineId) continue;
 
-      // need blindNumber for this wineId
       const wDoc = wSnap.docs.find((w) => w.id === wineId);
       const wd = wDoc ? (wDoc.data() as any) : null;
-      const blindNumber = wd && typeof wd.blindNumber === "number" ? wd.blindNumber : null;
+      const blindNumber =
+        wd && typeof wd.blindNumber === "number" ? wd.blindNumber : null;
+
       if (!blindNumber || blindNumber < 1) continue;
 
       const scores = (rd.scores ?? {}) as Record<string, any>;
@@ -103,31 +105,32 @@ export async function GET(req: Request) {
       }
     }
 
-    // compute averages into rows
+    // compute averages
     for (const row of rows) {
-      const bn = row.blindNumber;
-      const per = agg[bn] ?? {};
+      const per = agg[row.blindNumber] ?? {};
 
       let sumOverall = 0;
       let countOverall = 0;
 
       for (const c of criteria) {
-        const label = c.label;
-        const vals = per[label] ?? [];
+        const vals = per[c.label] ?? [];
         if (!vals.length) {
-          row.perCrit[label] = null;
+          row.perCrit[c.label] = null;
           continue;
         }
+
         const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
         const rounded = Math.round(avg * 100) / 100;
-        row.perCrit[label] = rounded;
+        row.perCrit[c.label] = rounded;
 
         sumOverall += avg;
-        countOverall += 1;
+        countOverall++;
       }
 
       row.overall =
-        countOverall > 0 ? Math.round((sumOverall / countOverall) * 100) / 100 : null;
+        countOverall > 0
+          ? Math.round((sumOverall / countOverall) * 100) / 100
+          : null;
     }
 
     const ranking = rows
@@ -141,12 +144,19 @@ export async function GET(req: Request) {
       tastingId,
       status: t.status ?? null,
       wineCount,
-      criteria: criteria.map((c) => ({ id: c.id, label: c.label, order: c.order })),
+      criteria: criteria.map((c) => ({
+        id: c.id,
+        label: c.label,
+        order: c.order,
+      })),
       rows,
       ranking,
       ratingCount: rSnap.size,
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message ?? "Error" },
+      { status: 500 }
+    );
   }
 }
