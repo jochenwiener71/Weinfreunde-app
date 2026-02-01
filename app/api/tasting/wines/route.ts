@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "../../../lib/firebaseAdmin";
+import { db } from "@/lib/firebaseAdmin";
 
 type WineSlotPublic = {
   id: string;
@@ -43,29 +43,21 @@ export async function GET(req: Request) {
       .collection("wines")
       .get();
 
-    // ✅ NEU: Details auch in "open" anzeigen (und natürlich in "revealed")
+    // ✅ Details sichtbar in "open" UND "revealed"
     const showDetails = status === "open" || status === "revealed";
 
     const wines: WineSlotPublic[] = winesSnap.docs
       .map((w) => {
         const wd = w.data() as any;
-        const blindNumber = typeof wd.blindNumber === "number" ? wd.blindNumber : null;
-        const serveOrder = typeof wd.serveOrder === "number" ? wd.serveOrder : null;
-
-        // ✅ Details je nach showDetails
-        const ownerName = showDetails && typeof wd.ownerName === "string" ? wd.ownerName : null;
-        const winery = showDetails && typeof wd.winery === "string" ? wd.winery : null;
-        const grape = showDetails && typeof wd.grape === "string" ? wd.grape : null;
-        const vintage = showDetails && typeof wd.vintage === "string" ? wd.vintage : null;
 
         return {
           id: w.id,
-          blindNumber,
-          serveOrder,
-          ownerName,
-          winery,
-          grape,
-          vintage,
+          blindNumber: typeof wd.blindNumber === "number" ? wd.blindNumber : null,
+          serveOrder: typeof wd.serveOrder === "number" ? wd.serveOrder : null,
+          ownerName: showDetails && typeof wd.ownerName === "string" ? wd.ownerName : null,
+          winery: showDetails && typeof wd.winery === "string" ? wd.winery : null,
+          grape: showDetails && typeof wd.grape === "string" ? wd.grape : null,
+          vintage: showDetails && typeof wd.vintage === "string" ? wd.vintage : null,
         };
       })
       .sort((a, b) => (a.blindNumber ?? 999) - (b.blindNumber ?? 999));
