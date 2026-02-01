@@ -90,66 +90,61 @@ export default function JoinClient({ initialSlug }: Props) {
           <h1 style={h1Style}>🍷 Weinprobe</h1>
           <p style={subStyle}>Bitte registriere dich zur Teilnahme</p>
 
-          <div style={{ display: "grid", gap: 12 }}>
-            <label style={labelStyle}>
-              Runde (Slug)
-              <input
-                value={slug}
-                onChange={(e) => setSlug(e.target.value)}
-                placeholder="weinfreunde"
-                style={inputStyle}
-                autoCapitalize="none"
-                autoCorrect="off"
-              />
-              <div style={hintStyle}>
-                Tipp: Wenn du über QR-Code kommst, ist das Feld automatisch befüllt.
-              </div>
-            </label>
+          {/* ✅ Nach erfolgreichem Join: Formular + Beitreten-Button ausblenden */}
+          {!joined ? (
+            <div style={{ display: "grid", gap: 12 }}>
+              <label style={labelStyle}>
+                Runde (Slug)
+                <input
+                  value={slug}
+                  onChange={(e) => setSlug(e.target.value)}
+                  placeholder="weinfreunde"
+                  style={inputStyle}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                />
+                <div style={hintStyle}>
+                  Tipp: Wenn du über QR-Code kommst, ist das Feld automatisch befüllt.
+                </div>
+              </label>
 
-            <label style={labelStyle}>
-              Dein Vorname
-              <input
-                value={alias}
-                onChange={(e) => setAlias(e.target.value)}
-                placeholder="Max"
-                style={inputStyle}
-              />
-            </label>
+              <label style={labelStyle}>
+                Dein Vorname
+                <input
+                  value={alias}
+                  onChange={(e) => setAlias(e.target.value)}
+                  placeholder="Max"
+                  style={inputStyle}
+                />
+              </label>
 
-            <label style={labelStyle}>
-              PIN (4-stellig)
-              <input
-                value={pin}
-                onChange={(e) => setPin(e.target.value.replace(/[^\d]/g, "").slice(0, 4))}
-                placeholder="1234"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                maxLength={4}
-                style={inputStyle}
-              />
-            </label>
+              <label style={labelStyle}>
+                PIN (4-stellig)
+                <input
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value.replace(/[^\d]/g, "").slice(0, 4))}
+                  placeholder="1234"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={4}
+                  style={inputStyle}
+                />
+              </label>
 
-            <button
-              onClick={submit}
-              disabled={!canSubmit || loading}
-              style={{
-                ...buttonStyle,
-                opacity: !canSubmit || loading ? 0.7 : 1,
-                cursor: !canSubmit || loading ? "not-allowed" : "pointer",
-              }}
-            >
-              {loading ? "Beitreten..." : "Beitreten"}
-            </button>
-          </div>
-
-          {msg && (
-            <p style={{ marginTop: 14, color: msg.includes("✅") ? "white" : "#ffb4b4" }}>
-              {msg}
-            </p>
-          )}
-
-          {joined && (
-            <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+              <button
+                onClick={submit}
+                disabled={!canSubmit || loading}
+                style={{
+                  ...buttonStyle,
+                  opacity: !canSubmit || loading ? 0.7 : 1,
+                  cursor: !canSubmit || loading ? "not-allowed" : "pointer",
+                }}
+              >
+                {loading ? "Beitreten..." : "Beitreten"}
+              </button>
+            </div>
+          ) : (
+            <div style={{ marginTop: 8, display: "grid", gap: 10 }}>
               {/* ✅ KORREKTER PFAD ZUR BEWERTUNG: /t/[slug]/wine/[blindNumber] */}
               <a
                 href={`/t/${encodeURIComponent(cleanedSlug)}/wine/1`}
@@ -157,11 +152,13 @@ export default function JoinClient({ initialSlug }: Props) {
               >
                 Zur Bewertung von Wein #1 →
               </a>
-
-              <div style={hintStyle}>
-                Du landest jetzt direkt auf der Bewertungsseite für den ersten Wein.
-              </div>
             </div>
+          )}
+
+          {msg && (
+            <p style={{ marginTop: 14, color: msg.includes("✅") ? "white" : "#ffb4b4" }}>
+              {msg}
+            </p>
           )}
 
           <p style={footerStyle}>
