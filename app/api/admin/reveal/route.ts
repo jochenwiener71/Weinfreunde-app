@@ -14,6 +14,16 @@ function getProvidedSecret(req: Request, body: any) {
   return fromBody;
 }
 
+function jsonError(message: string, status: number) {
+  return NextResponse.json({ error: message }, { status });
+}
+
+function normalizeStatus(input: any) {
+  const s = String(input ?? "revealed").trim();
+  const allowed = new Set(["open", "revealed", "closed", "draft"]);
+  return allowed.has(s) ? s : "revealed";
+}
+
 async function findTasting(bodyOrQuery: { tastingId?: string; publicSlug?: string }) {
   const tastingId = String(bodyOrQuery.tastingId ?? "").trim();
   const publicSlug = String(bodyOrQuery.publicSlug ?? "").trim();
@@ -26,7 +36,12 @@ async function findTasting(bodyOrQuery: { tastingId?: string; publicSlug?: strin
   }
 
   if (publicSlug) {
-    const q = await db().collection("tastings").where("publicSlug", "==", publicSlug).limit(1).get();
+    const q = await db()
+      .collection("tastings")
+      .where("publicSlug", "==", publicSlug)
+      .limit(1)
+      .get();
+
     if (q.empty) return null;
     return { ref: q.docs[0].ref, id: q.docs[0].id, data: q.docs[0].data() };
   }
@@ -44,18 +59,22 @@ export async function POST(req: Request) {
 
   const expected = String(process.env.ADMIN_SECRET ?? "").trim();
   if (!expected) {
-    return NextResponse.json({ error: "ADMIN_SECRET is not set in this deployment." }, { status: 500 });
+    return jsonError("ADMIN_SECRET is not set in this deployment.", 500);
   }
 
   const provided = getProvidedSecret(req, body);
   if (!provided || provided !== expected) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return jsonError("Forbidden", 403);
   }
 
-  const status = String(body?.status ?? "revealed").trim(); // open | revealed | closed | draft
+  const status = normalizeStatus(body?.status); // open | revealed | closed | draft
 
-  const found = await findTasting({ tastingId: body?.tastingId, publicSlug: body?.publicSlug });
-  if (!found) return NextResponse.json({ error: "Tasting not found" }, { status: 404 });
+  const found = await findTasting({
+    tastingId: body?.tastingId,
+    publicSlug: body?.publicSlug,
+  });
+
+  if (!found) return jsonError("Tasting not found", 404);
 
   await found.ref.update({
     status,
@@ -70,7 +89,7 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const publicSlug = String(url.searchParams.get("publicSlug") ?? "").trim();
   const tastingId = String(url.searchParams.get("tastingId") ?? "").trim();
-  const status = String(url.searchParams.get("status") ?? "revealed").trim();
+  const status = normalizeStatus(url.searchParams.get("status"));
 
   // Secret via header only on GET (safer than query)
   const expected = String(process.env.ADMIN_SECRET ?? "").trim();
@@ -79,11 +98,11 @@ export async function GET(req: Request) {
     req.headers.get("X-Admin-Secret") ||
     "";
 
-  if (!expected) return NextResponse.json({ error: "ADMIN_SECRET is not set in this deployment." }, { status: 500 });
-  if (!provided || provided.trim() !== expected) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!expected) return jsonError("ADMIN_SECRET is not set in this deployment.", 500);
+  if (!provided || provided.trim() !== expected) return jsonError("Forbidden", 403);
 
   const found = await findTasting({ tastingId, publicSlug });
-  if (!found) return NextResponse.json({ error: "Tasting not found" }, { status: 404 });
+  if (!found) return jsonError("Tasting not found", 404);
 
   await found.ref.update({
     status,
