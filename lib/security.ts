@@ -1,12 +1,41 @@
-import crypto from "crypto";
+import { NextResponse } from "next/server";
 
-const PIN_SALT = process.env.PIN_SALT ?? "dev-salt-change-me";
+/**
+ * Liest das Admin-Secret aus dem Request
+ * - Header: x-admin-secret
+ * - alternativ: Authorization: Bearer <secret>
+ */
+export function getAdminSecret(req: Request): string | null {
+  const header =
+    req.headers.get("x-admin-secret") ||
+    req.headers.get("X-Admin-Secret");
 
-export function hashPin(pin: string): string {
-  return crypto.createHmac("sha256", PIN_SALT).update(pin).digest("hex");
+  if (header && header.trim()) return header.trim();
+
+  const auth = req.headers.get("authorization") || "";
+  if (auth.toLowerCase().startsWith("bearer ")) {
+    const token = auth.slice(7).trim();
+    if (token) return token;
+  }
+
+  return null;
 }
 
-export function verifyPin(pin: string, pinHash: string): boolean {
-  if (!pinHash) return false;
-  return hashPin(pin) === pinHash;
+/**
+ * ❗ WIRFT FEHLER, wenn Admin-Secret fehlt oder falsch ist
+ * → ideal für Admin-Endpunkte
+ */
+export function requireAdminSecret(req: Request): string {
+  const provided = getAdminSecret(req);
+  const expected = process.env.ADMIN_SECRET;
+
+  if (!expected) {
+    throw new Error("ADMIN_SECRET not configured");
+  }
+
+  if (!provided || provided !== expected) {
+    throw new Error("Invalid ADMIN_SECRET");
+  }
+
+  return provided;
 }
