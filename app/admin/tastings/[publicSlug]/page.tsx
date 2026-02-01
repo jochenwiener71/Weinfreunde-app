@@ -25,11 +25,13 @@ type AdminGetTastingResponse = {
   wines: WineSlot[];
 };
 
-export default function AdminTastingDetailPage({
-  params,
-}: {
-  params: { publicSlug: string };
-}) {
+type Participant = {
+  id: string;
+  alias: string | null;
+  createdAt: string | null;
+};
+
+export default function AdminTastingDetailPage({ params }: { params: { publicSlug: string } }) {
   const publicSlug = decodeURIComponent(params.publicSlug || "");
 
   const [adminSecret, setAdminSecret] = useState("");
@@ -42,27 +44,27 @@ export default function AdminTastingDetailPage({
   const [editDate, setEditDate] = useState(""); // optional, if you add tastingDate later
   const [editMaxParticipants, setEditMaxParticipants] = useState<number>(10);
 
+  // ✅ Teilnehmer UI state
+  const [pLoading, setPLoading] = useState(false);
+  const [pMsg, setPMsg] = useState<string | null>(null);
+  const [participants, setParticipants] = useState<Participant[]>([]);
+
   useEffect(() => {
-    const saved =
-      typeof window !== "undefined"
-        ? window.localStorage.getItem("WF_ADMIN_SECRET")
-        : null;
+    const saved = typeof window !== "undefined" ? window.localStorage.getItem("WF_ADMIN_SECRET") : null;
     if (saved) setAdminSecret(saved);
   }, []);
 
   useEffect(() => {
-    if (adminSecret.trim())
-      window.localStorage.setItem("WF_ADMIN_SECRET", adminSecret.trim());
+    if (adminSecret.trim()) window.localStorage.setItem("WF_ADMIN_SECRET", adminSecret.trim());
   }, [adminSecret]);
 
   const canCall = useMemo(() => adminSecret.trim().length > 0, [adminSecret]);
 
-  // ✅ iOS/Safari: Hash-Jump zuverlässig machen
+  // ✅ iOS/Safari: Hash-Jump zuverlässig
   useEffect(() => {
     const hash = typeof window !== "undefined" ? window.location.hash : "";
     if (!hash) return;
 
-    // kleiner Delay, damit Layout gerendert ist
     const t = window.setTimeout(() => {
       const id = hash.replace("#", "");
       const el = document.getElementById(id);
@@ -76,13 +78,10 @@ export default function AdminTastingDetailPage({
     setMsg(null);
     setLoading(true);
     try {
-      const res = await fetch(
-        `/api/admin/get-tasting?publicSlug=${encodeURIComponent(publicSlug)}`,
-        {
-          method: "GET",
-          headers: { "x-admin-secret": adminSecret.trim() },
-        }
-      );
+      const res = await fetch(`/api/admin/get-tasting?publicSlug=${encodeURIComponent(publicSlug)}`, {
+        method: "GET",
+        headers: { "x-admin-secret": adminSecret.trim() },
+      });
 
       const text = await res.text();
       let json: any = {};
@@ -138,7 +137,6 @@ export default function AdminTastingDetailPage({
     }
   }
 
-  // Optional: Update meta if you add endpoint later (see note below)
   async function saveMeta() {
     setMsg(null);
     setLoading(true);
@@ -211,6 +209,76 @@ export default function AdminTastingDetailPage({
     }
   }
 
+  // ✅ Teilnehmer: laden
+  async function loadParticipants() {
+    setPMsg(null);
+    setPLoading(true);
+    try {
+      const res = await fetch(
+        `/api/admin/list-participants?publicSlug=${encodeURIComponent(publicSlug)}`,
+        {
+          method: "GET",
+          headers: { "x-admin-secret": adminSecret.trim() },
+        }
+      );
+
+      const text = await res.text();
+      let json: any = {};
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        json = { error: text || `HTTP ${res.status}` };
+      }
+
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+
+      setParticipants(Array.isArray(json?.participants) ? json.participants : []);
+      setPMsg(`Teilnehmer geladen ✅ (${json?.count ?? participants.length})`);
+    } catch (e: any) {
+      setPMsg(e?.message ?? "Fehler");
+    } finally {
+      setPLoading(false);
+    }
+  }
+
+  // ✅ Teilnehmer: löschen
+  async function deleteParticipant(participantId: string, alias: string | null) {
+    const ok = window.confirm(
+      `Teilnehmer wirklich löschen?\n\n${alias ?? "(ohne Name)"}\nID: ${participantId}\n\nHinweis: Zugehörige Ratings werden ebenfalls gelöscht (best-effort).`
+    );
+    if (!ok) return;
+
+    setPMsg(null);
+    setPLoading(true);
+    try {
+      const res = await fetch("/api/admin/delete-participant", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-secret": adminSecret.trim(),
+        },
+        body: JSON.stringify({ publicSlug, participantId }),
+      });
+
+      const text = await res.text();
+      let json: any = {};
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        json = { error: text || `HTTP ${res.status}` };
+      }
+
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+
+      setPMsg(`Gelöscht ✅ (Ratings gelöscht: ${json?.deletedRatings ?? 0})`);
+      await loadParticipants();
+    } catch (e: any) {
+      setPMsg(e?.message ?? "Fehler");
+    } finally {
+      setPLoading(false);
+    }
+  }
+
   const sectionCard: React.CSSProperties = {
     marginTop: 18,
     border: "1px solid rgba(0,0,0,0.12)",
@@ -250,7 +318,6 @@ export default function AdminTastingDetailPage({
         </a>
       </div>
 
-      {/* ✅ Schnell-Navigation innerhalb der Seite (Anker) */}
       <div style={anchorLinksRow}>
         <a href="#participants" style={chipLink}>Teilnehmer ↓</a>
         <a href="#criteria" style={chipLink}>Kategorien ↓</a>
@@ -306,14 +373,22 @@ export default function AdminTastingDetailPage({
         )}
       </section>
 
-      {/* ✅ Teilnehmer-Anker */}
+      {/* ✅ Teilnehmer */}
       <section id="participants" style={sectionCard}>
         <h2 style={{ fontSize: 16, margin: 0 }}>Teilnehmer</h2>
         <p style={{ marginTop: 8, opacity: 0.75 }}>
-          (Option A) Hier kannst du später Teilnehmer-Liste/Löschen integrieren – oder du bleibst bei Deep-Links.
+          Teilnehmer laden / löschen (Admin).
         </p>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+          <button
+            onClick={loadParticipants}
+            disabled={!canCall || pLoading}
+            style={{ padding: "10px 12px" }}
+          >
+            {pLoading ? "Lade..." : "Teilnehmer laden"}
+          </button>
+
           <a
             href={`/join?slug=${encodeURIComponent(publicSlug)}`}
             target="_blank"
@@ -328,61 +403,92 @@ export default function AdminTastingDetailPage({
           >
             Join-Link öffnen
           </a>
-
-          <a
-            href={`/t/${encodeURIComponent(publicSlug)}`}
-            target="_blank"
-            rel="noreferrer"
-            style={{
-              padding: "10px 12px",
-              border: "1px solid rgba(0,0,0,0.2)",
-              borderRadius: 8,
-              textDecoration: "none",
-              color: "inherit",
-            }}
-          >
-            Teilnehmer-Übersicht öffnen (/t/slug)
-          </a>
         </div>
 
-        <p style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-          Nächster Micro-Step (wenn du willst): API <code>/api/admin/list-participants</code> + Tabelle hier.
+        {pMsg && (
+          <p style={{ marginTop: 10, color: pMsg.includes("✅") ? "inherit" : "crimson" }}>
+            {pMsg}
+          </p>
+        )}
+
+        {!participants.length ? (
+          <p style={{ marginTop: 10, opacity: 0.7 }}>
+            Noch keine Teilnehmer geladen (oder leer). Klicke „Teilnehmer laden“.
+          </p>
+        ) : (
+          <div style={{ marginTop: 12, overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ textAlign: "left" }}>
+                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Name</th>
+                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Registriert</th>
+                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>ID</th>
+                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Aktion</th>
+                </tr>
+              </thead>
+              <tbody>
+                {participants.map((p) => (
+                  <tr key={p.id}>
+                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                      {p.alias ?? <span style={{ opacity: 0.6 }}>(ohne Name)</span>}
+                    </td>
+                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                      {p.createdAt ? (
+                        <span style={{ fontSize: 12 }}>{p.createdAt.replace("T", " ").slice(0, 19)}</span>
+                      ) : (
+                        <span style={{ opacity: 0.6 }}>-</span>
+                      )}
+                    </td>
+                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                      <code style={{ fontSize: 12 }}>{p.id}</code>
+                    </td>
+                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                      <button
+                        onClick={() => deleteParticipant(p.id, p.alias)}
+                        disabled={!canCall || pLoading}
+                        style={{ padding: "8px 10px", border: "1px solid crimson", color: "crimson" }}
+                      >
+                        Löschen
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <p style={{ marginTop: 10,_toggle: undefined as any, fontSize: 12, opacity: 0.7 }}>
+          Hinweis: Löschen entfernt den Teilnehmer und versucht außerdem seine Ratings zu löschen.
         </p>
       </section>
 
-      {/* ✅ Kriterien-Anker */}
+      {/* ✅ Kriterien-Anker (Platzhalter) */}
       <section id="criteria" style={sectionCard}>
         <h2 style={{ fontSize: 16, margin: 0 }}>Bewertungskategorien</h2>
         <p style={{ marginTop: 8, opacity: 0.75 }}>
-          (Option A) Kategorien sind aktuell im Tasting gespeichert (<code>criteria</code> Subcollection).
-          Hier können wir als nächstes ein kleines UI zum Hinzufügen/Umbenennen/Reihenfolge bauen.
+          Nächster Schritt: UI zum Bearbeiten (Label/Min/Max/Reihenfolge).
         </p>
-
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
-          <a
-            href={`/api/tasting/public?slug=${encodeURIComponent(publicSlug)}`}
-            target="_blank"
-            rel="noreferrer"
-            style={{
-              padding: "10px 12px",
-              border: "1px solid rgba(0,0,0,0.2)",
-              borderRadius: 8,
-              textDecoration: "none",
-              color: "inherit",
-            }}
-          >
-            Aktuelle Kategorien prüfen (public API)
-          </a>
-        </div>
-
-        <p style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-          Nächster Micro-Step: Admin-Endpoint <code>/api/admin/update-criteria</code> + UI hier.
-        </p>
+        <a
+          href={`/api/tasting/public?slug=${encodeURIComponent(publicSlug)}`}
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            display: "inline-block",
+            marginTop: 10,
+            padding: "10px 12px",
+            border: "1px solid rgba(0,0,0,0.2)",
+            borderRadius: 8,
+            textDecoration: "none",
+            color: "inherit",
+          }}
+        >
+          Aktuelle Kategorien prüfen (public API)
+        </a>
       </section>
 
       <hr style={{ marginTop: 18, opacity: 0.2 }} />
 
-      {/* Meta Section with anchor */}
       <section id="meta">
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>Meta-Daten</h2>
 
