@@ -12,6 +12,7 @@ export default function AdminHomePage() {
   // Quick Create inputs
   const [title, setTitle] = useState("");
   const [hostName, setHostName] = useState("");
+  const [date, setDate] = useState(""); // ✅ NEW (YYYY-MM-DD)
   const [pin, setPin] = useState("");
   const [wineCount, setWineCount] = useState(8);
   const [maxParticipants, setMaxParticipants] = useState(10);
@@ -56,12 +57,13 @@ export default function AdminHomePage() {
     if (!title.trim()) return false;
     if (!hostName.trim()) return false;
     if (!/^\d{4}$/.test(pin.trim())) return false;
+    if (date.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) return false; // ✅ NEW
     if (wineCount < 1 || wineCount > 10) return false;
     if (maxParticipants < 1 || maxParticipants > 10) return false;
     const validCriteria = criteria.filter((c) => c.label.trim().length > 0);
     if (validCriteria.length < 1 || validCriteria.length > 8) return false;
     return true;
-  }, [adminSecret, slug, title, hostName, pin, wineCount, maxParticipants, criteria]);
+  }, [adminSecret, slug, title, hostName, pin, date, wineCount, maxParticipants, criteria]);
 
   function updateCriterion(i: number, patch: Partial<Criterion>) {
     setCriteria((prev) => prev.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
@@ -86,6 +88,7 @@ export default function AdminHomePage() {
         publicSlug: slug,
         title: title.trim(),
         hostName: hostName.trim(),
+        date: date.trim() || null, // ✅ NEW
         pin: pin.trim(),
         wineCount,
         maxParticipants,
@@ -120,12 +123,6 @@ export default function AdminHomePage() {
 
       setResult(data);
       setMsg("Tasting erstellt ✅");
-
-      // Optional: Status/Link sofort nutzbar lassen – Felder NICHT leeren
-      // Wenn du lieber reset willst, kommentiere das hier ein:
-      // setTitle("");
-      // setHostName("");
-      // setPin("");
     } catch (e: any) {
       setMsg(e?.message ?? "Fehler");
     } finally {
@@ -140,7 +137,6 @@ export default function AdminHomePage() {
         Zentrale Admin-Seite: Quick Create + Links zu Verwaltung/Weinen/Reporting.
       </p>
 
-      {/* Admin + Slug */}
       <section style={{ marginTop: 16, padding: 14, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10 }}>
         <h2 style={{ margin: 0, fontSize: 16 }}>Admin & Tasting Kontext</h2>
 
@@ -186,6 +182,13 @@ export default function AdminHomePage() {
           </a>
 
           <a
+            href="/admin/reporting"
+            style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(0,0,0,0.15)", textDecoration: "none", color: "inherit" }}
+          >
+            📈 Reporting konfigurieren
+          </a>
+
+          <a
             href={resultsLink || "#"}
             onClick={(e) => {
               if (!resultsLink) {
@@ -207,11 +210,10 @@ export default function AdminHomePage() {
         </div>
       </section>
 
-      {/* Quick Create */}
       <section style={{ marginTop: 16, padding: 14, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10 }}>
         <h2 style={{ margin: 0, fontSize: 16 }}>Quick Create · Tasting anlegen</h2>
         <p style={{ marginTop: 6, opacity: 0.75 }}>
-          Erstellt ein Tasting inkl. Kriterien & Weinslots (ohne /admin/create).
+          Erstellt ein Tasting inkl. Kriterien & Weinslots.
         </p>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
@@ -236,14 +238,13 @@ export default function AdminHomePage() {
           </label>
 
           <label style={{ display: "block" }}>
-            PIN (4-stellig)
+            Datum (YYYY-MM-DD)
             <input
-              value={pin}
-              onChange={(e) => setPin(e.target.value)}
-              placeholder="1234"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={4}
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              placeholder="2026-02-01"
+              autoCapitalize="none"
+              autoCorrect="off"
               style={{ width: "100%", padding: 10, marginTop: 6, borderRadius: 8, border: "1px solid rgba(0,0,0,0.2)" }}
             />
           </label>
@@ -260,6 +261,19 @@ export default function AdminHomePage() {
               <option value="closed">closed</option>
               <option value="revealed">revealed</option>
             </select>
+          </label>
+
+          <label style={{ display: "block" }}>
+            PIN (4-stellig)
+            <input
+              value={pin}
+              onChange={(e) => setPin(e.target.value)}
+              placeholder="1234"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={4}
+              style={{ width: "100%", padding: 10, marginTop: 6, borderRadius: 8, border: "1px solid rgba(0,0,0,0.2)" }}
+            />
           </label>
 
           <label style={{ display: "block" }}>
@@ -294,12 +308,7 @@ export default function AdminHomePage() {
         {criteria.map((c, i) => (
           <div
             key={i}
-            style={{
-              border: "1px solid rgba(0,0,0,0.12)",
-              borderRadius: 8,
-              padding: 12,
-              marginBottom: 10,
-            }}
+            style={{ border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8, padding: 12, marginBottom: 10 }}
           >
             <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: 10 }}>
               <label style={{ display: "block" }}>
@@ -368,26 +377,14 @@ export default function AdminHomePage() {
         )}
 
         {result && (
-          <pre
-            style={{
-              marginTop: 12,
-              padding: 12,
-              borderRadius: 8,
-              background: "rgba(0,0,0,0.06)",
-              overflowX: "auto",
-            }}
-          >
+          <pre style={{ marginTop: 12, padding: 12, borderRadius: 8, background: "rgba(0,0,0,0.06)", overflowX: "auto" }}>
             {JSON.stringify(result, null, 2)}
           </pre>
         )}
       </section>
 
-      {/* Debug */}
       <section style={{ marginTop: 16, padding: 14, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10 }}>
         <h2 style={{ margin: 0, fontSize: 16 }}>Debug / API Links (optional)</h2>
-        <p style={{ marginTop: 6, opacity: 0.75 }}>
-          Für Admin-Endpunkte brauchst du den Header <code>x-admin-secret</code>.
-        </p>
 
         <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
           <div>
