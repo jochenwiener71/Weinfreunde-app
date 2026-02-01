@@ -6,9 +6,6 @@ type Props = {
   initialSlug: string;
 };
 
-// ✅ Hier definierst du das Ziel für "Bewerten"
-const RATE_PATH = "/rate"; // falls deine Bewertung woanders ist: hier ändern
-
 export default function JoinClient({ initialSlug }: Props) {
   const [slug, setSlug] = useState(initialSlug);
   const [pin, setPin] = useState("");
@@ -62,8 +59,7 @@ export default function JoinClient({ initialSlug }: Props) {
     }
   }
 
-  // ✅ Ziel-URL für Bewertung (publicSlug erwartet dein Backend schon)
-  const ratingHref = `${RATE_PATH}?publicSlug=${encodeURIComponent(slug.trim())}`;
+  const cleanedSlug = slug.trim();
 
   return (
     <div style={pageStyle}>
@@ -154,13 +150,16 @@ export default function JoinClient({ initialSlug }: Props) {
 
           {joined && (
             <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
-              {/* ✅ FIX: Weiter zur Bewertung statt /t/... */}
-              <a href={ratingHref} style={linkButtonStyle}>
-                Weiter zur Bewertung →
+              {/* ✅ KORREKTER PFAD ZUR BEWERTUNG: /t/[slug]/wine/[blindNumber] */}
+              <a
+                href={`/t/${encodeURIComponent(cleanedSlug)}/wine/1`}
+                style={linkButtonStyle}
+              >
+                Zur Bewertung von Wein #1 →
               </a>
 
               <div style={hintStyle}>
-                Hinweis: Ergebnisse findest du später z.B. unter <code>/tasting/summary</code>.
+                Du landest jetzt direkt auf der Bewertungsseite für den ersten Wein.
               </div>
             </div>
           )}
