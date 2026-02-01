@@ -22,85 +22,99 @@ type AdminGetTastingResponse = {
   status: string | null;
   wineCount: number | null;
   maxParticipants: number | null;
+  tastingDate?: string | null;
   wines: WineSlot[];
 };
 
-type Participant = {
+type ParticipantRow = {
   id: string;
   alias: string | null;
-  createdAt: string | null;
+  createdAt?: string | null;
+  ratingCount?: number | null;
 };
 
-export default function AdminTastingDetailPage({ params }: { params: { publicSlug: string } }) {
+function safeJsonParse(text: string) {
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return { error: text };
+  }
+}
+
+export default function AdminTastingDetailPage({
+  params,
+}: {
+  params: { publicSlug: string };
+}) {
   const publicSlug = decodeURIComponent(params.publicSlug || "");
 
   const [adminSecret, setAdminSecret] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+
   const [data, setData] = useState<AdminGetTastingResponse | null>(null);
 
+  // meta edit
   const [editTitle, setEditTitle] = useState("");
   const [editHost, setEditHost] = useState("");
-  const [editDate, setEditDate] = useState(""); // optional, if you add tastingDate later
+  const [editDate, setEditDate] = useState("");
   const [editMaxParticipants, setEditMaxParticipants] = useState<number>(10);
 
-  // ✅ Teilnehmer UI state
+  // participants
   const [pLoading, setPLoading] = useState(false);
   const [pMsg, setPMsg] = useState<string | null>(null);
-  const [participants, setParticipants] = useState<Participant[]>([]);
+  const [participants, setParticipants] = useState<ParticipantRow[]>([]);
 
+  // Restore secret
   useEffect(() => {
-    const saved = typeof window !== "undefined" ? window.localStorage.getItem("WF_ADMIN_SECRET") : null;
+    const saved =
+      typeof window !== "undefined"
+        ? window.localStorage.getItem("WF_ADMIN_SECRET")
+        : null;
     if (saved) setAdminSecret(saved);
   }, []);
 
   useEffect(() => {
-    if (adminSecret.trim()) window.localStorage.setItem("WF_ADMIN_SECRET", adminSecret.trim());
+    if (adminSecret.trim()) {
+      window.localStorage.setItem("WF_ADMIN_SECRET", adminSecret.trim());
+    }
   }, [adminSecret]);
 
-  const canCall = useMemo(() => adminSecret.trim().length > 0, [adminSecret]);
+  const canCall = useMemo(
+    () => adminSecret.trim().length > 0,
+    [adminSecret]
+  );
 
-  // ✅ iOS/Safari: Hash-Jump zuverlässig
-  useEffect(() => {
-    const hash = typeof window !== "undefined" ? window.location.hash : "";
-    if (!hash) return;
-
-    const t = window.setTimeout(() => {
-      const id = hash.replace("#", "");
-      const el = document.getElementById(id);
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 50);
-
-    return () => window.clearTimeout(t);
-  }, []);
-
-  async function load() {
+  async function loadTasting() {
     setMsg(null);
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/get-tasting?publicSlug=${encodeURIComponent(publicSlug)}`, {
-        method: "GET",
-        headers: { "x-admin-secret": adminSecret.trim() },
-      });
+      const res = await fetch(
+        `/api/admin/get-tasting?publicSlug=${encodeURIComponent(publicSlug)}`,
+        {
+          method: "GET",
+          headers: { "x-admin-secret": adminSecret.trim() },
+        }
+      );
 
       const text = await res.text();
-      let json: any = {};
-      try {
-        json = text ? JSON.parse(text) : {};
-      } catch {
-        json = { error: text || `HTTP ${res.status}` };
-      }
+      const json = safeJsonParse(text);
+
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
 
-      setData(json as AdminGetTastingResponse);
+      const t = json as AdminGetTastingResponse;
+      setData(t);
 
-      setEditTitle(String(json?.title ?? ""));
-      setEditHost(String(json?.hostName ?? ""));
-      setEditMaxParticipants(Number(json?.maxParticipants ?? 10));
+      setEditTitle(String(t?.title ?? ""));
+      setEditHost(String(t?.hostName ?? ""));
+      setEditDate(String((t as any)?.tastingDate ?? ""));
+      setEditMaxParticipants(Number(t?.maxParticipants ?? 10));
 
-      setMsg("Geladen ✅");
+      setMsg("Tasting geladen ✅");
     } catch (e: any) {
       setMsg(e?.message ?? "Fehler");
+      setData(null);
     } finally {
       setLoading(false);
     }
@@ -120,16 +134,11 @@ export default function AdminTastingDetailPage({ params }: { params: { publicSlu
       });
 
       const text = await res.text();
-      let json: any = {};
-      try {
-        json = text ? JSON.parse(text) : {};
-      } catch {
-        json = { error: text || `HTTP ${res.status}` };
-      }
+      const json = safeJsonParse(text);
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
 
       setMsg(`Status gesetzt: ${status} ✅`);
-      await load();
+      await loadTasting();
     } catch (e: any) {
       setMsg(e?.message ?? "Fehler");
     } finally {
@@ -151,22 +160,17 @@ export default function AdminTastingDetailPage({ params }: { params: { publicSlu
           publicSlug,
           title: editTitle.trim(),
           hostName: editHost.trim(),
-          tastingDate: editDate.trim() || "", // optional
+          tastingDate: editDate.trim() || "",
           maxParticipants: Number(editMaxParticipants),
         }),
       });
 
       const text = await res.text();
-      let json: any = {};
-      try {
-        json = text ? JSON.parse(text) : {};
-      } catch {
-        json = { error: text || `HTTP ${res.status}` };
-      }
+      const json = safeJsonParse(text);
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
 
-      setMsg("Gespeichert ✅");
-      await load();
+      setMsg("Meta gespeichert ✅");
+      await loadTasting();
     } catch (e: any) {
       setMsg(e?.message ?? "Fehler");
     } finally {
@@ -193,12 +197,7 @@ export default function AdminTastingDetailPage({ params }: { params: { publicSlu
       });
 
       const text = await res.text();
-      let json: any = {};
-      try {
-        json = text ? JSON.parse(text) : {};
-      } catch {
-        json = { error: text || `HTTP ${res.status}` };
-      }
+      const json = safeJsonParse(text);
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
 
       window.location.href = "/admin/tastings";
@@ -209,7 +208,9 @@ export default function AdminTastingDetailPage({ params }: { params: { publicSlu
     }
   }
 
-  // ✅ Teilnehmer: laden
+  // =========================
+  // Participants
+  // =========================
   async function loadParticipants() {
     setPMsg(null);
     setPLoading(true);
@@ -223,28 +224,23 @@ export default function AdminTastingDetailPage({ params }: { params: { publicSlu
       );
 
       const text = await res.text();
-      let json: any = {};
-      try {
-        json = text ? JSON.parse(text) : {};
-      } catch {
-        json = { error: text || `HTTP ${res.status}` };
-      }
-
+      const json = safeJsonParse(text);
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
 
-      setParticipants(Array.isArray(json?.participants) ? json.participants : []);
-      setPMsg(`Teilnehmer geladen ✅ (${json?.count ?? participants.length})`);
+      const rows = Array.isArray(json?.participants) ? json.participants : [];
+      setParticipants(rows);
+      setPMsg("Teilnehmer geladen ✅");
     } catch (e: any) {
       setPMsg(e?.message ?? "Fehler");
+      setParticipants([]);
     } finally {
       setPLoading(false);
     }
   }
 
-  // ✅ Teilnehmer: löschen
-  async function deleteParticipant(participantId: string, alias: string | null) {
+  async function deleteParticipant(participantId: string) {
     const ok = window.confirm(
-      `Teilnehmer wirklich löschen?\n\n${alias ?? "(ohne Name)"}\nID: ${participantId}\n\nHinweis: Zugehörige Ratings werden ebenfalls gelöscht (best-effort).`
+      `Teilnehmer wirklich löschen?\n\nID: ${participantId}\n\nHinweis: Löschen entfernt den Teilnehmer und versucht außerdem seine Ratings zu löschen.`
     );
     if (!ok) return;
 
@@ -261,16 +257,10 @@ export default function AdminTastingDetailPage({ params }: { params: { publicSlu
       });
 
       const text = await res.text();
-      let json: any = {};
-      try {
-        json = text ? JSON.parse(text) : {};
-      } catch {
-        json = { error: text || `HTTP ${res.status}` };
-      }
-
+      const json = safeJsonParse(text);
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
 
-      setPMsg(`Gelöscht ✅ (Ratings gelöscht: ${json?.deletedRatings ?? 0})`);
+      setPMsg("Teilnehmer gelöscht ✅");
       await loadParticipants();
     } catch (e: any) {
       setPMsg(e?.message ?? "Fehler");
@@ -278,30 +268,6 @@ export default function AdminTastingDetailPage({ params }: { params: { publicSlu
       setPLoading(false);
     }
   }
-
-  const sectionCard: React.CSSProperties = {
-    marginTop: 18,
-    border: "1px solid rgba(0,0,0,0.12)",
-    borderRadius: 12,
-    padding: 16,
-  };
-
-  const anchorLinksRow: React.CSSProperties = {
-    display: "flex",
-    gap: 10,
-    flexWrap: "wrap",
-    marginTop: 10,
-    alignItems: "center",
-  };
-
-  const chipLink: React.CSSProperties = {
-    padding: "8px 10px",
-    border: "1px solid rgba(0,0,0,0.18)",
-    borderRadius: 999,
-    textDecoration: "none",
-    color: "inherit",
-    fontSize: 13,
-  };
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 980 }}>
@@ -312,21 +278,22 @@ export default function AdminTastingDetailPage({ params }: { params: { publicSlu
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
         <Link href="/admin/tastings">← Tastings</Link>
-        <Link href={`/admin/wines?publicSlug=${encodeURIComponent(publicSlug)}`}>Weine</Link>
-        <a href={`/join?slug=${encodeURIComponent(publicSlug)}`} target="_blank" rel="noreferrer">
+        <Link href={`/admin/wines?publicSlug=${encodeURIComponent(publicSlug)}`}>
+          Weine
+        </Link>
+        <a
+          href={`/join?slug=${encodeURIComponent(publicSlug)}`}
+          target="_blank"
+          rel="noreferrer"
+        >
           Join-Link
         </a>
       </div>
 
-      <div style={anchorLinksRow}>
-        <a href="#participants" style={chipLink}>Teilnehmer ↓</a>
-        <a href="#criteria" style={chipLink}>Kategorien ↓</a>
-        <a href="#meta" style={chipLink}>Meta ↓</a>
-        <a href="#debug" style={chipLink}>Debug ↓</a>
-      </div>
-
+      {/* Admin secret */}
       <section style={{ marginTop: 18 }}>
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>Admin</h2>
+
         <label style={{ display: "block" }}>
           ADMIN_SECRET
           <input
@@ -340,27 +307,52 @@ export default function AdminTastingDetailPage({ params }: { params: { publicSlu
         </label>
 
         <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
-          <button onClick={load} disabled={!canCall || loading} style={{ padding: "10px 12px" }}>
+          <button
+            onClick={loadTasting}
+            disabled={!canCall || loading}
+            style={{ padding: "10px 12px" }}
+          >
             {loading ? "Lade..." : "Tasting laden"}
           </button>
 
-          <button onClick={() => setStatus("open")} disabled={!canCall || loading} style={{ padding: "10px 12px" }}>
+          <button
+            onClick={() => setStatus("open")}
+            disabled={!canCall || loading}
+            style={{ padding: "10px 12px" }}
+          >
             Status: open
           </button>
-          <button onClick={() => setStatus("closed")} disabled={!canCall || loading} style={{ padding: "10px 12px" }}>
+          <button
+            onClick={() => setStatus("closed")}
+            disabled={!canCall || loading}
+            style={{ padding: "10px 12px" }}
+          >
             Status: closed
           </button>
-          <button onClick={() => setStatus("revealed")} disabled={!canCall || loading} style={{ padding: "10px 12px" }}>
+          <button
+            onClick={() => setStatus("revealed")}
+            disabled={!canCall || loading}
+            style={{ padding: "10px 12px" }}
+          >
             Status: revealed
           </button>
-          <button onClick={() => setStatus("draft")} disabled={!canCall || loading} style={{ padding: "10px 12px" }}>
+          <button
+            onClick={() => setStatus("draft")}
+            disabled={!canCall || loading}
+            style={{ padding: "10px 12px" }}
+          >
             Status: draft
           </button>
 
           <button
             onClick={deleteTasting}
             disabled={!canCall || loading}
-            style={{ padding: "10px 12px", border: "1px solid crimson", color: "crimson" }}
+            style={{
+              padding: "10px 12px",
+              border: "1px solid crimson",
+              color: "crimson",
+              background: "transparent",
+            }}
           >
             Löschen
           </button>
@@ -373,123 +365,10 @@ export default function AdminTastingDetailPage({ params }: { params: { publicSlu
         )}
       </section>
 
-      {/* ✅ Teilnehmer */}
-      <section id="participants" style={sectionCard}>
-        <h2 style={{ fontSize: 16, margin: 0 }}>Teilnehmer</h2>
-        <p style={{ marginTop: 8, opacity: 0.75 }}>
-          Teilnehmer laden / löschen (Admin).
-        </p>
-
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
-          <button
-            onClick={loadParticipants}
-            disabled={!canCall || pLoading}
-            style={{ padding: "10px 12px" }}
-          >
-            {pLoading ? "Lade..." : "Teilnehmer laden"}
-          </button>
-
-          <a
-            href={`/join?slug=${encodeURIComponent(publicSlug)}`}
-            target="_blank"
-            rel="noreferrer"
-            style={{
-              padding: "10px 12px",
-              border: "1px solid rgba(0,0,0,0.2)",
-              borderRadius: 8,
-              textDecoration: "none",
-              color: "inherit",
-            }}
-          >
-            Join-Link öffnen
-          </a>
-        </div>
-
-        {pMsg && (
-          <p style={{ marginTop: 10, color: pMsg.includes("✅") ? "inherit" : "crimson" }}>
-            {pMsg}
-          </p>
-        )}
-
-        {!participants.length ? (
-          <p style={{ marginTop: 10, opacity: 0.7 }}>
-            Noch keine Teilnehmer geladen (oder leer). Klicke „Teilnehmer laden“.
-          </p>
-        ) : (
-          <div style={{ marginTop: 12, overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ textAlign: "left" }}>
-                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Name</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Registriert</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>ID</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Aktion</th>
-                </tr>
-              </thead>
-              <tbody>
-                {participants.map((p) => (
-                  <tr key={p.id}>
-                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
-                      {p.alias ?? <span style={{ opacity: 0.6 }}>(ohne Name)</span>}
-                    </td>
-                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
-                      {p.createdAt ? (
-                        <span style={{ fontSize: 12 }}>{p.createdAt.replace("T", " ").slice(0, 19)}</span>
-                      ) : (
-                        <span style={{ opacity: 0.6 }}>-</span>
-                      )}
-                    </td>
-                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
-                      <code style={{ fontSize: 12 }}>{p.id}</code>
-                    </td>
-                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
-                      <button
-                        onClick={() => deleteParticipant(p.id, p.alias)}
-                        disabled={!canCall || pLoading}
-                        style={{ padding: "8px 10px", border: "1px solid crimson", color: "crimson" }}
-                      >
-                        Löschen
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        <p style={{ marginTop: 10,_toggle: undefined as any, fontSize: 12, opacity: 0.7 }}>
-          Hinweis: Löschen entfernt den Teilnehmer und versucht außerdem seine Ratings zu löschen.
-        </p>
-      </section>
-
-      {/* ✅ Kriterien-Anker (Platzhalter) */}
-      <section id="criteria" style={sectionCard}>
-        <h2 style={{ fontSize: 16, margin: 0 }}>Bewertungskategorien</h2>
-        <p style={{ marginTop: 8, opacity: 0.75 }}>
-          Nächster Schritt: UI zum Bearbeiten (Label/Min/Max/Reihenfolge).
-        </p>
-        <a
-          href={`/api/tasting/public?slug=${encodeURIComponent(publicSlug)}`}
-          target="_blank"
-          rel="noreferrer"
-          style={{
-            display: "inline-block",
-            marginTop: 10,
-            padding: "10px 12px",
-            border: "1px solid rgba(0,0,0,0.2)",
-            borderRadius: 8,
-            textDecoration: "none",
-            color: "inherit",
-          }}
-        >
-          Aktuelle Kategorien prüfen (public API)
-        </a>
-      </section>
-
       <hr style={{ marginTop: 18, opacity: 0.2 }} />
 
-      <section id="meta">
+      {/* Meta */}
+      <section>
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>Meta-Daten</h2>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -536,23 +415,108 @@ export default function AdminTastingDetailPage({ params }: { params: { publicSlu
           </label>
         </div>
 
-        <p style={{ fontSize: 12, opacity: 0.7, marginTop: 10 }}>
-          Hinweis: Speichern braucht den Endpoint <code>/api/admin/update-tasting-meta</code>.
-        </p>
-
         <button
           onClick={saveMeta}
           disabled={!canCall || loading}
-          style={{ padding: "10px 12px", marginTop: 10 }}
+          style={{ padding: "10px 12px", marginTop: 12 }}
         >
           Meta speichern
         </button>
+
+        <p style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
+          Hinweis: Speichern braucht den Endpoint <code>/api/admin/update-tasting-meta</code>.
+        </p>
       </section>
 
       <hr style={{ marginTop: 18, opacity: 0.2 }} />
 
-      <section id="debug">
-        <h2 style={{ fontSize: 16, marginBottom: 8 }}>Aktueller Stand</h2>
+      {/* Participants (integrated) */}
+      <section id="participants">
+        <h2 style={{ fontSize: 16, marginBottom: 8 }}>Teilnehmer</h2>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button
+            onClick={loadParticipants}
+            disabled={!canCall || pLoading}
+            style={{ padding: "10px 12px" }}
+          >
+            {pLoading ? "Lade..." : "Teilnehmer laden"}
+          </button>
+        </div>
+
+        {pMsg && (
+          <p style={{ marginTop: 10, color: pMsg.includes("✅") ? "inherit" : "crimson" }}>
+            {pMsg}
+          </p>
+        )}
+
+        {!participants.length ? (
+          <p style={{ marginTop: 10, fontSize: 13, opacity: 0.7 }}>
+            Noch keine Teilnehmer geladen oder leer.
+          </p>
+        ) : (
+          <div style={{ marginTop: 12, overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ textAlign: "left" }}>
+                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>
+                    Alias
+                  </th>
+                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>
+                    ID
+                  </th>
+                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>
+                    Ratings
+                  </th>
+                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>
+                    Aktion
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {participants.map((p) => (
+                  <tr key={p.id}>
+                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                      {p.alias || <span style={{ opacity: 0.6 }}>(ohne Name)</span>}
+                    </td>
+                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                      <code>{p.id}</code>
+                    </td>
+                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                      {typeof p.ratingCount === "number" ? p.ratingCount : "-"}
+                    </td>
+                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                      <button
+                        onClick={() => deleteParticipant(p.id)}
+                        disabled={!canCall || pLoading}
+                        style={{
+                          padding: "8px 10px",
+                          border: "1px solid rgba(220,0,0,0.6)",
+                          color: "crimson",
+                          background: "transparent",
+                          borderRadius: 6,
+                        }}
+                      >
+                        Löschen
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <p style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
+              Hinweis: Löschen entfernt den Teilnehmer und versucht außerdem seine Ratings zu löschen.
+            </p>
+          </div>
+        )}
+      </section>
+
+      <hr style={{ marginTop: 18, opacity: 0.2 }} />
+
+      {/* Debug: current data */}
+      <section>
+        <h2 style={{ fontSize: 16, marginBottom: 8 }}>Aktueller Stand (Debug)</h2>
         {!data ? (
           <p style={{ opacity: 0.7 }}>Noch nichts geladen.</p>
         ) : (
