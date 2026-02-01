@@ -1,10 +1,11 @@
-import { Suspense } from "react";
-import AdminCreateTastingClient from "./AdminCreateTastingClient";
+import AdminCreateClient from "./AdminCreateClient";
 
-export default function Page() {
+export const dynamic = "force-dynamic";
+
+export default function AdminCreatePage() {
   return (
-    <Suspense fallback={<main style={{ padding: 24, fontFamily: "system-ui" }}>Lade…</main>}>
-      <AdminCreateTastingClient />
-    </Suspense>
+    <main style={{ padding: 24 }}>
+      <AdminCreateClient />
+    </main>
   );
 }
