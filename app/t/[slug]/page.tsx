@@ -42,14 +42,22 @@ type WinesResponse = {
 };
 
 function sortKeyServeOrBlind(w: { serveOrder: number | null; blindNumber: number | null }) {
-  // if serveOrder set -> primary
   if (typeof w.serveOrder === "number") return w.serveOrder * 1000 + (w.blindNumber ?? 999);
-  // else fallback to blindNumber
   return 999_000 + (w.blindNumber ?? 999);
 }
 
 function sortKeyBlindOnly(blindNumber: number | null) {
   return blindNumber ?? 999;
+}
+
+function fmtSecondsAgo(sec: number) {
+  if (sec < 1) return "gerade eben";
+  if (sec === 1) return "vor 1 Sekunde";
+  if (sec < 60) return `vor ${sec} Sekunden`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (m === 1) return s ? `vor 1 Minute ${s}s` : "vor 1 Minute";
+  return s ? `vor ${m} Minuten ${s}s` : `vor ${m} Minuten`;
 }
 
 export default function TastingResultPage({ params }: { params: { slug: string } }) {
@@ -61,6 +69,11 @@ export default function TastingResultPage({ params }: { params: { slug: string }
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
+  // live badge state
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const [secondsAgo, setSecondsAgo] = useState<number>(0);
+
   // admin UI gating
   const [adminMode, setAdminMode] = useState(false);
 
@@ -71,6 +84,8 @@ export default function TastingResultPage({ params }: { params: { slug: string }
 
   async function fetchAll() {
     setErr(null);
+    setIsUpdating(true);
+
     try {
       const [sRes, wRes] = await Promise.all([
         fetch(`/api/tasting/summary?publicSlug=${encodeURIComponent(publicSlug)}`, { cache: "no-store" }),
@@ -88,16 +103,20 @@ export default function TastingResultPage({ params }: { params: { slug: string }
 
       setSummary(sJson);
       setWines(wJson);
+
+      const now = Date.now();
+      setLastUpdatedAt(now);
+      setSecondsAgo(0);
     } catch (e: any) {
       setErr(e?.message ?? "Fehler beim Laden");
     } finally {
+      setIsUpdating(false);
       setLoading(false);
     }
   }
 
   // auto refresh (polling) + adminMode via ?admin=1
   useEffect(() => {
-    // admin mode only if URL contains ?admin=1
     try {
       const sp = new URLSearchParams(window.location.search);
       setAdminMode(sp.get("admin") === "1");
@@ -112,16 +131,27 @@ export default function TastingResultPage({ params }: { params: { slug: string }
       await fetchAll();
     })();
 
-    const id = window.setInterval(() => {
+    const pollId = window.setInterval(() => {
       fetchAll();
     }, 3000);
 
     return () => {
       alive = false;
-      window.clearInterval(id);
+      window.clearInterval(pollId);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [publicSlug]);
+
+  // seconds ticker for "last updated"
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (!lastUpdatedAt) return;
+      const diffSec = Math.max(0, Math.floor((Date.now() - lastUpdatedAt) / 1000));
+      setSecondsAgo(diffSec);
+    }, 1000);
+
+    return () => window.clearInterval(id);
+  }, [lastUpdatedAt]);
 
   const criteriaLabels = useMemo(() => {
     return (summary?.criteria ?? []).map((c) => c.label);
@@ -145,22 +175,18 @@ export default function TastingResultPage({ params }: { params: { slug: string }
     return s || "unknown";
   }, [summary, wines]);
 
-  // Do we have any serveOrder at all?
   const hasServeOrder = useMemo(() => {
     return (wines?.wines ?? []).some((w) => typeof w.serveOrder === "number");
   }, [wines]);
 
-  // For "Alle Weine" table, we want ordering by serveOrder if present, otherwise blindNumber
   const rowsOrderedForDisplay = useMemo(() => {
     const rows = (summary?.rows ?? []).slice();
-
     if (!rows.length) return rows;
 
     if (!hasServeOrder) {
       return rows.sort((a, b) => sortKeyBlindOnly(a.blindNumber) - sortKeyBlindOnly(b.blindNumber));
     }
 
-    // Build mapping blindNumber -> serveOrder for sorting
     const serveByBlind = new Map<number, number>();
     for (const w of wines?.wines ?? []) {
       if (typeof w.blindNumber === "number" && typeof w.serveOrder === "number") {
@@ -182,6 +208,7 @@ export default function TastingResultPage({ params }: { params: { slug: string }
   async function setStatus(nextStatus: "open" | "revealed" | "closed" | "draft") {
     setAdminMsg(null);
     setAdminLoading(true);
+
     try {
       const res = await fetch("/api/admin/reveal", {
         method: "POST",
@@ -206,7 +233,7 @@ export default function TastingResultPage({ params }: { params: { slug: string }
       if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
 
       setAdminMsg(`Status gesetzt: ${nextStatus} ✅`);
-      await fetchAll(); // sofort aktualisieren
+      await fetchAll();
     } catch (e: any) {
       setAdminMsg(e?.message ?? "Admin-Fehler");
     } finally {
@@ -214,15 +241,69 @@ export default function TastingResultPage({ params }: { params: { slug: string }
     }
   }
 
+  const liveBadge = useMemo(() => {
+    // if never updated successfully yet
+    if (!lastUpdatedAt) {
+      return (
+        <span
+          style={{
+            padding: "4px 8px",
+            borderRadius: 999,
+            border: "1px solid rgba(0,0,0,0.15)",
+            fontSize: 12,
+            opacity: 0.85,
+          }}
+        >
+          Live: noch kein Stand
+        </span>
+      );
+    }
+
+    // updating badge
+    if (isUpdating) {
+      return (
+        <span
+          style={{
+            padding: "4px 8px",
+            borderRadius: 999,
+            border: "1px solid rgba(0,0,0,0.18)",
+            fontSize: 12,
+          }}
+        >
+          Live · aktualisiere…
+        </span>
+      );
+    }
+
+    // normal badge
+    return (
+      <span
+        style={{
+          padding: "4px 8px",
+          borderRadius: 999,
+          border: "1px solid rgba(0,0,0,0.15)",
+          fontSize: 12,
+          opacity: 0.9,
+        }}
+      >
+        Live · {fmtSecondsAgo(secondsAgo)}
+      </span>
+    );
+  }, [isUpdating, lastUpdatedAt, secondsAgo]);
+
   return (
     <main style={{ padding: 20, fontFamily: "system-ui", maxWidth: 980, margin: "0 auto" }}>
       <header style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
         <div>
           <h1 style={{ margin: 0 }}>Ergebnisse · {publicSlug}</h1>
-          <p style={{ margin: "6px 0 0 0", opacity: 0.75 }}>
-            Status: <b>{statusText}</b> · Ratings: <b>{summary?.ratingCount ?? "—"}</b>{" "}
-            <span style={{ opacity: 0.7 }}>(Auto-Refresh alle 3s)</span>
-          </p>
+
+          <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+            {liveBadge}
+            <span style={{ opacity: 0.75 }}>
+              Status: <b>{statusText}</b> · Ratings: <b>{summary?.ratingCount ?? "—"}</b>
+            </span>
+          </div>
+
           {hasServeOrder && (
             <p style={{ margin: "6px 0 0 0", fontSize: 12, opacity: 0.7 }}>
               Anzeige ist nach <b>Serve-Order</b> sortiert (wenn gesetzt), sonst nach Blindnummer.
@@ -232,9 +313,10 @@ export default function TastingResultPage({ params }: { params: { slug: string }
 
         <button
           onClick={fetchAll}
+          disabled={isUpdating}
           style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.15)" }}
         >
-          Jetzt aktualisieren
+          {isUpdating ? "Aktualisiere…" : "Jetzt aktualisieren"}
         </button>
       </header>
 
@@ -301,10 +383,6 @@ export default function TastingResultPage({ params }: { params: { slug: string }
               {adminMsg}
             </p>
           )}
-
-          <p style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-            Tipp: Ohne <code>?admin=1</code> wird dieser Admin-Block gar nicht gerendert (Teilnehmer sehen ihn nicht).
-          </p>
         </section>
       )}
 
