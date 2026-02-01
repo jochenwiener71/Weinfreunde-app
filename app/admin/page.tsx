@@ -52,7 +52,13 @@ export default function AdminHomePage() {
               placeholder="z. B. weinfreunde"
               autoCapitalize="none"
               autoCorrect="off"
-              style={{ width: "100%", padding: 10, marginTop: 6, borderRadius: 8, border: "1px solid rgba(0,0,0,0.2)" }}
+              style={{
+                width: "100%",
+                padding: 10,
+                marginTop: 6,
+                borderRadius: 8,
+                border: "1px solid rgba(0,0,0,0.2)",
+              }}
             />
           </label>
 
@@ -64,27 +70,18 @@ export default function AdminHomePage() {
               placeholder="optional (wird nicht gespeichert)"
               autoCapitalize="none"
               autoCorrect="off"
-              style={{ width: "100%", padding: 10, marginTop: 6, borderRadius: 8, border: "1px solid rgba(0,0,0,0.2)" }}
+              style={{
+                width: "100%",
+                padding: 10,
+                marginTop: 6,
+                borderRadius: 8,
+                border: "1px solid rgba(0,0,0,0.2)",
+              }}
             />
           </label>
         </div>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 14 }}>
-          {/* ✅ 2 Create-Tasting Buttons, damit du sofort siehst welche Route existiert */}
-          <a
-            href="/admin/create-tasting"
-            style={{
-              display: "inline-block",
-              padding: "10px 12px",
-              borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.15)",
-              textDecoration: "none",
-              color: "inherit",
-            }}
-          >
-            ➕ Tasting anlegen (Route A)
-          </a>
-
           <a
             href="/admin/create"
             style={{
@@ -96,7 +93,7 @@ export default function AdminHomePage() {
               color: "inherit",
             }}
           >
-            ➕ Tasting anlegen (Route B)
+            ➕ Tasting anlegen
           </a>
 
           <a
@@ -150,7 +147,7 @@ export default function AdminHomePage() {
         </div>
 
         <p style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-          Tipp: Klicke „Route A“ oder „Route B“. Die, die funktioniert, ist dein echter Create-Pfad. Danach kannst du den anderen Button entfernen.
+          Create-Tasting ist fix auf <code>/admin/create</code> gesetzt.
         </p>
       </section>
 
@@ -163,14 +160,22 @@ export default function AdminHomePage() {
         <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
           <div>
             <div style={{ fontSize: 12, opacity: 0.7 }}>Public Summary</div>
-            <a href={apiSummary || "#"} onClick={(e) => !apiSummary && e.preventDefault()} style={{ wordBreak: "break-all" }}>
+            <a
+              href={apiSummary || "#"}
+              onClick={(e) => !apiSummary && e.preventDefault()}
+              style={{ wordBreak: "break-all" }}
+            >
               {apiSummary || "— (publicSlug fehlt)"}
             </a>
           </div>
 
           <div>
             <div style={{ fontSize: 12, opacity: 0.7 }}>Public Wines</div>
-            <a href={apiWines || "#"} onClick={(e) => !apiWines && e.preventDefault()} style={{ wordBreak: "break-all" }}>
+            <a
+              href={apiWines || "#"}
+              onClick={(e) => !apiWines && e.preventDefault()}
+              style={{ wordBreak: "break-all" }}
+            >
               {apiWines || "— (publicSlug fehlt)"}
             </a>
           </div>
@@ -188,7 +193,8 @@ export default function AdminHomePage() {
 
         {adminSecret.trim() && (
           <p style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-            Secret ist im Feld eingetragen. Für Admin-Endpunkte im Browser braucht man es als Header – später kann man das in UI-Buttons kapseln.
+            Secret ist im Feld eingetragen. Für Admin-Endpunkte im Browser braucht man es als Header – später können wir mehr
+            Aktionen direkt als Buttons integrieren.
           </p>
         )}
       </section>
