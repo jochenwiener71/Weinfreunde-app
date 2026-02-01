@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/firebaseAdmin";
+import { db } from "../../../lib/firebaseAdmin";
 
 type WineSlotPublic = {
   id: string;
@@ -15,12 +15,13 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const publicSlug = String(searchParams.get("publicSlug") ?? "").trim();
+
     if (!publicSlug) {
       return NextResponse.json({ error: "Missing publicSlug" }, { status: 400 });
     }
 
     // find tasting by publicSlug
-    const snap = await db
+    const snap = await db()
       .collection("tastings")
       .where("publicSlug", "==", publicSlug)
       .limit(1)
@@ -32,10 +33,11 @@ export async function GET(req: Request) {
 
     const doc = snap.docs[0];
     const tastingId = doc.id;
-    const t = doc.data() as any;
-    const status = String(t.status ?? "");
+    const data = doc.data() as any;
+    const status = String(data.status ?? "");
 
-    const winesSnap = await db
+    // wines
+    const winesSnap = await db()
       .collection("tastings")
       .doc(tastingId)
       .collection("wines")
@@ -46,17 +48,23 @@ export async function GET(req: Request) {
     const wines: WineSlotPublic[] = winesSnap.docs
       .map((w) => {
         const wd = w.data() as any;
+        const blindNumber = typeof wd.blindNumber === "number" ? wd.blindNumber : null;
+        const serveOrder = typeof wd.serveOrder === "number" ? wd.serveOrder : null;
 
-        // vor Reveal: nur Nummern/Order, Rest null
+        // only reveal details after reveal
+        const ownerName = revealed && typeof wd.ownerName === "string" ? wd.ownerName : null;
+        const winery = revealed && typeof wd.winery === "string" ? wd.winery : null;
+        const grape = revealed && typeof wd.grape === "string" ? wd.grape : null;
+        const vintage = revealed && typeof wd.vintage === "string" ? wd.vintage : null;
+
         return {
           id: w.id,
-          blindNumber: typeof wd.blindNumber === "number" ? wd.blindNumber : null,
-          serveOrder: typeof wd.serveOrder === "number" ? wd.serveOrder : null,
-
-          ownerName: revealed && typeof wd.ownerName === "string" ? wd.ownerName : null,
-          winery: revealed && typeof wd.winery === "string" ? wd.winery : null,
-          grape: revealed && typeof wd.grape === "string" ? wd.grape : null,
-          vintage: revealed && typeof wd.vintage === "string" ? wd.vintage : null,
+          blindNumber,
+          serveOrder,
+          ownerName,
+          winery,
+          grape,
+          vintage,
         };
       })
       .sort((a, b) => (a.blindNumber ?? 999) - (b.blindNumber ?? 999));
@@ -66,6 +74,7 @@ export async function GET(req: Request) {
       publicSlug,
       tastingId,
       status,
+      wineCount: data.wineCount ?? wines.length,
       wines,
     });
   } catch (e: any) {
