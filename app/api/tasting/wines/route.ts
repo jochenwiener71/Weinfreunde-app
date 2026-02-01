@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "../../../lib/firebaseAdmin";
+import { db } from "@/lib/firebaseAdmin";
 
 type WineSlotPublic = {
   id: string;
@@ -48,14 +48,25 @@ export async function GET(req: Request) {
     const wines: WineSlotPublic[] = winesSnap.docs
       .map((w) => {
         const wd = w.data() as any;
-        const blindNumber = typeof wd.blindNumber === "number" ? wd.blindNumber : null;
-        const serveOrder = typeof wd.serveOrder === "number" ? wd.serveOrder : null;
+
+        const blindNumber =
+          typeof wd.blindNumber === "number" ? wd.blindNumber : null;
+
+        const serveOrder =
+          typeof wd.serveOrder === "number" ? wd.serveOrder : null;
 
         // only reveal details after reveal
-        const ownerName = revealed && typeof wd.ownerName === "string" ? wd.ownerName : null;
-        const winery = revealed && typeof wd.winery === "string" ? wd.winery : null;
-        const grape = revealed && typeof wd.grape === "string" ? wd.grape : null;
-        const vintage = revealed && typeof wd.vintage === "string" ? wd.vintage : null;
+        const ownerName =
+          revealed && typeof wd.ownerName === "string" ? wd.ownerName : null;
+
+        const winery =
+          revealed && typeof wd.winery === "string" ? wd.winery : null;
+
+        const grape =
+          revealed && typeof wd.grape === "string" ? wd.grape : null;
+
+        const vintage =
+          revealed && typeof wd.vintage === "string" ? wd.vintage : null;
 
         return {
           id: w.id,
@@ -78,6 +89,9 @@ export async function GET(req: Request) {
       wines,
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message ?? "Error" },
+      { status: 500 }
+    );
   }
 }
