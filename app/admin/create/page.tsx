@@ -1,19 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 type Criterion = { label: string; scaleMin: number; scaleMax: number };
 
-type WineMetaInput = {
-  blindNumber: number; // 1..wineCount (blind)
-  serveOrder: number | null; // Reihenfolge der Verkostung (optional)
-  ownerName: string; // Person, die den Wein mitgebracht hat
-  winery: string; // Weingut
-  grape: string; // Rebsorte
-  vintage: string; // Jahrgang (string ist flexibel: "2021", "NV", ...)
-};
-
 export default function AdminCreateTastingPage() {
+  const sp = useSearchParams();
+
   const [adminSecret, setAdminSecret] = useState("");
 
   const [publicSlug, setPublicSlug] = useState("");
@@ -32,33 +26,36 @@ export default function AdminCreateTastingPage() {
     { label: "Gesamteindruck", scaleMin: 1, scaleMax: 10 },
   ]);
 
-  // ---------- 3A: Wines State ----------
-  function makeInitialWines(count: number): WineMetaInput[] {
-    return Array.from({ length: count }, (_, i) => ({
-      blindNumber: i + 1,
-      serveOrder: null,
-      ownerName: "",
-      winery: "",
-      grape: "",
-      vintage: "",
-    }));
-  }
-
-  const [wines, setWines] = useState<WineMetaInput[]>(() => makeInitialWines(wineCount));
-
-  // wenn wineCount geändert wird, Wines neu initialisieren
-  useEffect(() => {
-    setWines(makeInitialWines(wineCount));
-  }, [wineCount]);
-
-  function updateWine(blindNumber: number, patch: Partial<WineMetaInput>) {
-    setWines((prev) => prev.map((w) => (w.blindNumber === blindNumber ? { ...w, ...patch } : w)));
-  }
-  // ------------------------------------
-
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
+
+  // ✅ Prefill aus Query-Params (läuft einmal beim Laden)
+  useEffect(() => {
+    const qAdminSecret = String(sp.get("adminSecret") ?? "").trim();
+    const qSlug = String(sp.get("publicSlug") ?? "").trim();
+    const qTitle = String(sp.get("title") ?? "").trim();
+    const qHost = String(sp.get("hostName") ?? "").trim();
+    const qPin = String(sp.get("pin") ?? "").trim();
+    const qWineCount = Number(sp.get("wineCount") ?? "");
+    const qMaxParticipants = Number(sp.get("maxParticipants") ?? "");
+    const qStatus = String(sp.get("status") ?? "").trim() as any;
+
+    if (qAdminSecret) setAdminSecret(qAdminSecret);
+    if (qSlug) setPublicSlug(qSlug);
+    if (qTitle) setTitle(qTitle);
+    if (qHost) setHostName(qHost);
+    if (qPin) setPin(qPin);
+
+    if (Number.isFinite(qWineCount) && qWineCount >= 1 && qWineCount <= 10) setWineCount(qWineCount);
+    if (Number.isFinite(qMaxParticipants) && qMaxParticipants >= 1 && qMaxParticipants <= 10)
+      setMaxParticipants(qMaxParticipants);
+
+    if (qStatus === "draft" || qStatus === "open" || qStatus === "closed" || qStatus === "revealed") {
+      setStatus(qStatus);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const canSubmit = useMemo(() => {
     if (!adminSecret.trim()) return false;
@@ -70,8 +67,6 @@ export default function AdminCreateTastingPage() {
     if (maxParticipants < 1 || maxParticipants > 10) return false;
     const validCriteria = criteria.filter((c) => c.label.trim().length > 0);
     if (validCriteria.length < 1 || validCriteria.length > 8) return false;
-
-    // optional: du kannst hier verlangen, dass ownerName gesetzt ist, sobald serveOrder gesetzt ist etc.
     return true;
   }, [adminSecret, publicSlug, title, hostName, pin, wineCount, maxParticipants, criteria]);
 
@@ -109,17 +104,6 @@ export default function AdminCreateTastingPage() {
             scaleMax: Number(c.scaleMax),
           }))
           .filter((c) => c.label.length > 0),
-
-        // ---------- 3A: wines ins Payload ----------
-        wines: wines.map((w) => ({
-          blindNumber: Number(w.blindNumber),
-          serveOrder: w.serveOrder === null ? null : Number(w.serveOrder),
-          ownerName: (w.ownerName ?? "").trim(),
-          winery: (w.winery ?? "").trim(),
-          grape: (w.grape ?? "").trim(),
-          vintage: (w.vintage ?? "").trim(),
-        })),
-        // ------------------------------------------
       };
 
       const res = await fetch("/api/admin/create-tasting", {
@@ -271,88 +255,6 @@ export default function AdminCreateTastingPage() {
 
       <hr style={{ marginTop: 18, opacity: 0.2 }} />
 
-      {/* ---------- 3A: Wein-Admin-Eingaben ---------- */}
-      <section>
-        <h2 style={{ fontSize: 16, marginBottom: 8 }}>Weine – Admin-Daten (pro Blindnummer)</h2>
-        <p style={{ marginTop: 0, opacity: 0.75, fontSize: 13 }}>
-          Optional: Reihenfolge & Wein-Infos kannst du auch erst während/nach der Verkostung ausfüllen.
-        </p>
-
-        <div style={{ display: "grid", gap: 12 }}>
-          {wines.map((w) => (
-            <div
-              key={w.blindNumber}
-              style={{
-                border: "1px solid rgba(0,0,0,0.12)",
-                borderRadius: 8,
-                padding: 12,
-              }}
-            >
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>Blind #{w.blindNumber}</div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "140px 1fr",
-                  gap: 10,
-                  alignItems: "center",
-                }}
-              >
-                <label style={{ display: "block" }}>Reihenfolge</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={wineCount}
-                  value={w.serveOrder ?? ""}
-                  onChange={(e) =>
-                    updateWine(w.blindNumber, {
-                      serveOrder: e.target.value ? Number(e.target.value) : null,
-                    })
-                  }
-                  placeholder="z.B. 3"
-                  style={{ width: "100%", padding: 10 }}
-                />
-
-                <label style={{ display: "block" }}>Mitgebracht von</label>
-                <input
-                  value={w.ownerName}
-                  onChange={(e) => updateWine(w.blindNumber, { ownerName: e.target.value })}
-                  placeholder="Name"
-                  style={{ width: "100%", padding: 10 }}
-                />
-
-                <label style={{ display: "block" }}>Weingut</label>
-                <input
-                  value={w.winery}
-                  onChange={(e) => updateWine(w.blindNumber, { winery: e.target.value })}
-                  placeholder="z.B. Pietradolce"
-                  style={{ width: "100%", padding: 10 }}
-                />
-
-                <label style={{ display: "block" }}>Rebsorte</label>
-                <input
-                  value={w.grape}
-                  onChange={(e) => updateWine(w.blindNumber, { grape: e.target.value })}
-                  placeholder="z.B. Nerello Mascalese"
-                  style={{ width: "100%", padding: 10 }}
-                />
-
-                <label style={{ display: "block" }}>Jahrgang</label>
-                <input
-                  value={w.vintage}
-                  onChange={(e) => updateWine(w.blindNumber, { vintage: e.target.value })}
-                  placeholder="z.B. 2021"
-                  style={{ width: "100%", padding: 10 }}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-      {/* -------------------------------------------- */}
-
-      <hr style={{ marginTop: 18, opacity: 0.2 }} />
-
       <section>
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>Kriterien (max 8)</h2>
 
@@ -423,7 +325,11 @@ export default function AdminCreateTastingPage() {
         {loading ? "Erstelle..." : "Tasting erstellen"}
       </button>
 
-      {msg && <p style={{ marginTop: 12, color: msg.includes("✅") ? "inherit" : "crimson" }}>{msg}</p>}
+      {msg && (
+        <p style={{ marginTop: 12, color: msg.includes("✅") ? "inherit" : "crimson" }}>
+          {msg}
+        </p>
+      )}
 
       {result && (
         <pre
