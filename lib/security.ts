@@ -1,9 +1,18 @@
-import { NextResponse } from "next/server";
+import crypto from "crypto";
+
+/**
+ * 🔐 Hash für 4-stellige PIN
+ * wird in Firestore gespeichert (nie die Klar-PIN!)
+ */
+export function hashPin(pin: string): string {
+  const salt = process.env.PIN_SALT || "default_salt";
+  return crypto.createHash("sha256").update(pin + salt).digest("hex");
+}
 
 /**
  * Liest das Admin-Secret aus dem Request
  * - Header: x-admin-secret
- * - alternativ: Authorization: Bearer <secret>
+ * - oder Authorization: Bearer <secret>
  */
 export function getAdminSecret(req: Request): string | null {
   const header =
@@ -22,8 +31,8 @@ export function getAdminSecret(req: Request): string | null {
 }
 
 /**
- * ❗ WIRFT FEHLER, wenn Admin-Secret fehlt oder falsch ist
- * → ideal für Admin-Endpunkte
+ * ❗ Erzwingt korrektes ADMIN_SECRET
+ * → für Admin-Endpoints
  */
 export function requireAdminSecret(req: Request): string {
   const provided = getAdminSecret(req);
