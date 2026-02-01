@@ -13,18 +13,6 @@ export default function AdminHomePage() {
     return `/t/${encodeURIComponent(slug)}?admin=1`;
   }, [slug]);
 
-  const winesLink = useMemo(() => {
-    // /admin/wines braucht aktuell slug+secret in der Seite selbst – wir verlinken nur dorthin
-    return `/admin/wines`;
-  }, []);
-
-  const createLink = useMemo(() => {
-    // Falls du eine dedizierte Create-Seite hast, ändere das hier entsprechend.
-    // Wenn dein Create-Formular schon unter /admin/create liegt: setze "/admin/create"
-    // Wenn es unter /admin (alt) lag, ist es jetzt /admin/page.tsx – daher: bitte anpassen.
-    return `/admin/create-tasting`;
-  }, []);
-
   const apiSummary = useMemo(() => {
     if (!slug) return "";
     return `/api/tasting/summary?publicSlug=${encodeURIComponent(slug)}`;
@@ -49,7 +37,7 @@ export default function AdminHomePage() {
     <main style={{ padding: 20, fontFamily: "system-ui", maxWidth: 980, margin: "0 auto" }}>
       <h1 style={{ margin: 0 }}>Admin · Weinfreunde Tasting App</h1>
       <p style={{ marginTop: 6, opacity: 0.75 }}>
-        Zentrale Admin-Seite mit Links zu Tasting-Verwaltung, Weinen und Reporting.
+        Zentrale Admin-Seite mit Links zu Tastings, Weinen und Reporting.
       </p>
 
       <section style={{ marginTop: 16, padding: 14, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10 }}>
@@ -82,8 +70,9 @@ export default function AdminHomePage() {
         </div>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 14 }}>
+          {/* ✅ 2 Create-Tasting Buttons, damit du sofort siehst welche Route existiert */}
           <a
-            href={createLink}
+            href="/admin/create-tasting"
             style={{
               display: "inline-block",
               padding: "10px 12px",
@@ -93,7 +82,21 @@ export default function AdminHomePage() {
               color: "inherit",
             }}
           >
-            ➕ Tastings anlegen
+            ➕ Tasting anlegen (Route A)
+          </a>
+
+          <a
+            href="/admin/create"
+            style={{
+              display: "inline-block",
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: "1px solid rgba(0,0,0,0.15)",
+              textDecoration: "none",
+              color: "inherit",
+            }}
+          >
+            ➕ Tasting anlegen (Route B)
           </a>
 
           <a
@@ -111,7 +114,7 @@ export default function AdminHomePage() {
           </a>
 
           <a
-            href={winesLink}
+            href="/admin/wines"
             style={{
               display: "inline-block",
               padding: "10px 12px",
@@ -147,7 +150,7 @@ export default function AdminHomePage() {
         </div>
 
         <p style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-          Hinweis: <b>/admin/tastings</b> und <b>/admin/create-tasting</b> bauen wir als nächste Schritte. Der Link ist schon vorbereitet.
+          Tipp: Klicke „Route A“ oder „Route B“. Die, die funktioniert, ist dein echter Create-Pfad. Danach kannst du den anderen Button entfernen.
         </p>
       </section>
 
@@ -185,25 +188,10 @@ export default function AdminHomePage() {
 
         {adminSecret.trim() && (
           <p style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-            Dein Secret ist aktuell im Feld eingetragen. Beim Testen von Admin-Endpunkten im Browser brauchst du es im Header –
-            wir bauen später eine Admin-UI (Buttons) für Tastings/Reporting, sodass du das nicht mehr manuell machen musst.
+            Secret ist im Feld eingetragen. Für Admin-Endpunkte im Browser braucht man es als Header – später kann man das in UI-Buttons kapseln.
           </p>
         )}
       </section>
-
-      <section style={{ marginTop: 16, padding: 14, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10 }}>
-        <h2 style={{ margin: 0, fontSize: 16 }}>Roadmap (kurz)</h2>
-        <ol style={{ marginTop: 8, paddingLeft: 18, opacity: 0.85 }}>
-          <li>/admin/create-tasting (falls noch nicht vorhanden) oder Link auf deine bestehende Create-Seite setzen</li>
-          <li>/admin/tastings: Liste + löschen + öffnen/reveal Buttons</li>
-          <li>/admin/reporting: Auswahl Darstellungen (Charts/Tabellen) pro Tasting</li>
-        </ol>
-      </section>
-
-      <p style={{ marginTop: 18, fontSize: 12, opacity: 0.65 }}>
-        Tipp: Wenn dein Create-Tasting-Formular aktuell unter einem anderen Pfad liegt, ändere oben im Code einfach{" "}
-        <code>createLink</code>.
-      </p>
     </main>
   );
 }
