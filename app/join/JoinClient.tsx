@@ -6,6 +6,9 @@ type Props = {
   initialSlug: string;
 };
 
+// ✅ Hier definierst du das Ziel für "Bewerten"
+const RATE_PATH = "/rate"; // falls deine Bewertung woanders ist: hier ändern
+
 export default function JoinClient({ initialSlug }: Props) {
   const [slug, setSlug] = useState(initialSlug);
   const [pin, setPin] = useState("");
@@ -51,10 +54,6 @@ export default function JoinClient({ initialSlug }: Props) {
 
       setJoined(true);
       setMsg("Registrierung erfolgreich ✅");
-
-      // Optional: automatisch weiter
-      // Wenn du schon eine Teilnehmer-Seite hast, hier anpassen:
-      // window.location.href = `/t/${slug.trim()}`;
     } catch (e: any) {
       setMsg(e?.message ?? "Join fehlgeschlagen");
       setJoined(false);
@@ -62,6 +61,9 @@ export default function JoinClient({ initialSlug }: Props) {
       setLoading(false);
     }
   }
+
+  // ✅ Ziel-URL für Bewertung (publicSlug erwartet dein Backend schon)
+  const ratingHref = `${RATE_PATH}?publicSlug=${encodeURIComponent(slug.trim())}`;
 
   return (
     <div style={pageStyle}>
@@ -152,16 +154,13 @@ export default function JoinClient({ initialSlug }: Props) {
 
           {joined && (
             <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
-              <a
-                href={`/t/${encodeURIComponent(slug.trim())}`}
-                style={linkButtonStyle}
-              >
-                Weiter zur Verkostung →
+              {/* ✅ FIX: Weiter zur Bewertung statt /t/... */}
+              <a href={ratingHref} style={linkButtonStyle}>
+                Weiter zur Bewertung →
               </a>
 
               <div style={hintStyle}>
-                Falls deine Teilnehmer-Seite anders heißt, sag mir den Pfad (z.B. <code>/t/[slug]</code> oder <code>/rate</code>),
-                dann passe ich den Link 1:1 an.
+                Hinweis: Ergebnisse findest du später z.B. unter <code>/tasting/summary</code>.
               </div>
             </div>
           )}
