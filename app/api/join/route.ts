@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import admin from "firebase-admin";
-import { db } from "../../../lib/firebaseAdmin";
-import { verifyPin } from "../../../lib/security";
-import { createSession } from "../../../lib/session";
+import { db } from "@/lib/firebaseAdmin";
+import { verifyPin } from "@/lib/security";
+import { createSession } from "@/lib/session";
 
 export async function POST(req: Request) {
   try {
@@ -53,6 +53,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Join failed" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message ?? "Join failed" },
+      { status: 500 }
+    );
   }
 }
