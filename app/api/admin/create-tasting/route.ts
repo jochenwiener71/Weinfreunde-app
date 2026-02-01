@@ -3,7 +3,11 @@ import admin from "firebase-admin";
 import { db } from "@/lib/firebaseAdmin";
 import { hashPin } from "@/lib/security";
 
-type CriterionInput = { label: string; scaleMin: number; scaleMax: number };
+type CriterionInput = {
+  label: string;
+  scaleMin: number;
+  scaleMax: number;
+};
 
 function getProvidedSecret(req: Request, body: any): string {
   // Primary: header
@@ -44,20 +48,21 @@ export async function POST(req: Request) {
     body = {};
   }
 
-  const expected = (process.env.ADMIN_SECRET ?? "").trim();
-const provided = getProvidedSecret(req, body);
+  const expected = String(process.env.ADMIN_SECRET ?? "").trim();
+  const provided = getProvidedSecret(req, body);
 
-// 🔥 NOTFALL-FIX: Wenn ADMIN_SECRET nicht existiert,
-// erlaube Zugriff, solange ein Secret gesendet wurde.
-if (!expected) {
-  if (!provided) {
-    return jsonError("Forbidden", 403);
+  // 🔥 Notfall-Fix:
+  // Wenn ADMIN_SECRET nicht gesetzt ist,
+  // erlaube Zugriff nur, wenn irgendein Secret gesendet wurde.
+  if (!expected) {
+    if (!provided) {
+      return jsonError("Forbidden", 403);
+    }
+  } else {
+    if (!provided || provided !== expected) {
+      return jsonError("Forbidden", 403);
+    }
   }
-} else {
-  if (!provided || provided !== expected) {
-    return jsonError("Forbidden", 403);
-  }
-}
 
   try {
     const publicSlug = String(body.publicSlug ?? "").trim();
@@ -73,23 +78,33 @@ if (!expected) {
     if (!publicSlug || !title || !hostName || !/^\d{4}$/.test(pin)) {
       return jsonError("Invalid input", 400);
     }
+
     if (!Number.isInteger(wineCount) || wineCount < 1 || wineCount > 10) {
       return jsonError("Invalid wineCount", 400);
     }
-    if (!Number.isInteger(maxParticipants) || maxParticipants < 1 || maxParticipants > 10) {
+
+    if (
+      !Number.isInteger(maxParticipants) ||
+      maxParticipants < 1 ||
+      maxParticipants > 10
+    ) {
       return jsonError("Invalid maxParticipants", 400);
     }
+
     if (!Array.isArray(criteria) || criteria.length < 1 || criteria.length > 8) {
       return jsonError("Invalid criteria", 400);
     }
+
     if (criteria.some((c) => !String(c.label ?? "").trim())) {
       return jsonError("Criteria labels must not be empty", 400);
     }
 
-    // Enforce slug format (recommended)
-    // If you want to allow spaces, remove this block.
+    // Enforce slug format
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(publicSlug)) {
-      return jsonError("publicSlug must be lowercase and use only a-z, 0-9 and hyphens", 400);
+      return jsonError(
+        "publicSlug must be lowercase and use only a-z, 0-9 and hyphens",
+        400
+      );
     }
 
     // Uniqueness check
@@ -109,6 +124,7 @@ if (!expected) {
     const tRef = db().collection("tastings").doc();
     const batch = db().batch();
 
+    // Main tasting document
     batch.set(tRef, {
       publicSlug,
       title,
@@ -151,7 +167,11 @@ if (!expected) {
 
     await batch.commit();
 
-    return NextResponse.json({ ok: true, tastingId: tRef.id, publicSlug });
+    return NextResponse.json({
+      ok: true,
+      tastingId: tRef.id,
+      publicSlug,
+    });
   } catch (e: any) {
     return jsonError(e?.message ?? "Create tasting failed", 500);
   }
