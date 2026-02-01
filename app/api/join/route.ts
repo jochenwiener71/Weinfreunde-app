@@ -15,7 +15,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid input" }, { status: 400 });
     }
 
-    const q = await getdb()
+    const q = await db()
       .collection("tastings")
       .where("publicSlug", "==", slug)
       .limit(1)
@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     }
 
     const tastingDoc = q.docs[0];
-    const tasting = tastingDoc.data();
+    const tasting = tastingDoc.data() as any;
 
     if (tasting.status !== "open") {
       return NextResponse.json({ error: "Tasting not open" }, { status: 403 });
