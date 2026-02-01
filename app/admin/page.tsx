@@ -8,6 +8,18 @@ export default function AdminHomePage() {
 
   const slug = useMemo(() => publicSlug.trim(), [publicSlug]);
 
+  const createLink = useMemo(() => {
+    // Vorbelegung: publicSlug + optional adminSecret (nur Komfort, wird nicht gespeichert)
+    const sp = new URLSearchParams();
+    if (slug) sp.set("publicSlug", slug);
+
+    // Optional: wenn du willst, dass das Secret auch schon im Create-Form steht:
+    if (adminSecret.trim()) sp.set("adminSecret", adminSecret.trim());
+
+    const qs = sp.toString();
+    return qs ? `/admin/create?${qs}` : `/admin/create`;
+  }, [slug, adminSecret]);
+
   const resultsLink = useMemo(() => {
     if (!slug) return "";
     return `/t/${encodeURIComponent(slug)}?admin=1`;
@@ -83,7 +95,7 @@ export default function AdminHomePage() {
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 14 }}>
           <a
-            href="/admin/create"
+            href={createLink}
             style={{
               display: "inline-block",
               padding: "10px 12px",
@@ -147,7 +159,8 @@ export default function AdminHomePage() {
         </div>
 
         <p style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-          Create-Tasting ist fix auf <code>/admin/create</code> gesetzt.
+          Der Create-Link übernimmt automatisch <code>?publicSlug=...</code>
+          {adminSecret.trim() ? " (und optional adminSecret)." : "."}
         </p>
       </section>
 
@@ -190,13 +203,6 @@ export default function AdminHomePage() {
             <div style={{ wordBreak: "break-all" }}>{apiAdminRevealHint || "— (publicSlug fehlt)"}</div>
           </div>
         </div>
-
-        {adminSecret.trim() && (
-          <p style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-            Secret ist im Feld eingetragen. Für Admin-Endpunkte im Browser braucht man es als Header – später können wir mehr
-            Aktionen direkt als Buttons integrieren.
-          </p>
-        )}
       </section>
     </main>
   );
