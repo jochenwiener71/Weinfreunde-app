@@ -1,11 +1,10 @@
+import { Suspense } from "react";
 import AdminCreateClient from "./AdminCreateClient";
 
-export const dynamic = "force-dynamic";
-
-export default function AdminCreatePage() {
+export default function Page() {
   return (
-    <main style={{ padding: 24 }}>
+    <Suspense fallback={<main style={{ padding: 24, fontFamily: "system-ui" }}>Lade…</main>}>
       <AdminCreateClient />
-    </main>
+    </Suspense>
   );
 }
