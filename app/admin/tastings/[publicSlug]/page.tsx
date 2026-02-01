@@ -25,7 +25,11 @@ type AdminGetTastingResponse = {
   wines: WineSlot[];
 };
 
-export default function AdminTastingDetailPage({ params }: { params: { publicSlug: string } }) {
+export default function AdminTastingDetailPage({
+  params,
+}: {
+  params: { publicSlug: string };
+}) {
   const publicSlug = decodeURIComponent(params.publicSlug || "");
 
   const [adminSecret, setAdminSecret] = useState("");
@@ -39,24 +43,46 @@ export default function AdminTastingDetailPage({ params }: { params: { publicSlu
   const [editMaxParticipants, setEditMaxParticipants] = useState<number>(10);
 
   useEffect(() => {
-    const saved = typeof window !== "undefined" ? window.localStorage.getItem("WF_ADMIN_SECRET") : null;
+    const saved =
+      typeof window !== "undefined"
+        ? window.localStorage.getItem("WF_ADMIN_SECRET")
+        : null;
     if (saved) setAdminSecret(saved);
   }, []);
 
   useEffect(() => {
-    if (adminSecret.trim()) window.localStorage.setItem("WF_ADMIN_SECRET", adminSecret.trim());
+    if (adminSecret.trim())
+      window.localStorage.setItem("WF_ADMIN_SECRET", adminSecret.trim());
   }, [adminSecret]);
 
   const canCall = useMemo(() => adminSecret.trim().length > 0, [adminSecret]);
+
+  // ✅ iOS/Safari: Hash-Jump zuverlässig machen
+  useEffect(() => {
+    const hash = typeof window !== "undefined" ? window.location.hash : "";
+    if (!hash) return;
+
+    // kleiner Delay, damit Layout gerendert ist
+    const t = window.setTimeout(() => {
+      const id = hash.replace("#", "");
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+
+    return () => window.clearTimeout(t);
+  }, []);
 
   async function load() {
     setMsg(null);
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/get-tasting?publicSlug=${encodeURIComponent(publicSlug)}`, {
-        method: "GET",
-        headers: { "x-admin-secret": adminSecret.trim() },
-      });
+      const res = await fetch(
+        `/api/admin/get-tasting?publicSlug=${encodeURIComponent(publicSlug)}`,
+        {
+          method: "GET",
+          headers: { "x-admin-secret": adminSecret.trim() },
+        }
+      );
 
       const text = await res.text();
       let json: any = {};
@@ -185,6 +211,30 @@ export default function AdminTastingDetailPage({ params }: { params: { publicSlu
     }
   }
 
+  const sectionCard: React.CSSProperties = {
+    marginTop: 18,
+    border: "1px solid rgba(0,0,0,0.12)",
+    borderRadius: 12,
+    padding: 16,
+  };
+
+  const anchorLinksRow: React.CSSProperties = {
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
+    marginTop: 10,
+    alignItems: "center",
+  };
+
+  const chipLink: React.CSSProperties = {
+    padding: "8px 10px",
+    border: "1px solid rgba(0,0,0,0.18)",
+    borderRadius: 999,
+    textDecoration: "none",
+    color: "inherit",
+    fontSize: 13,
+  };
+
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 980 }}>
       <h1 style={{ marginBottom: 6 }}>Admin · Tasting verwalten</h1>
@@ -198,6 +248,14 @@ export default function AdminTastingDetailPage({ params }: { params: { publicSlu
         <a href={`/join?slug=${encodeURIComponent(publicSlug)}`} target="_blank" rel="noreferrer">
           Join-Link
         </a>
+      </div>
+
+      {/* ✅ Schnell-Navigation innerhalb der Seite (Anker) */}
+      <div style={anchorLinksRow}>
+        <a href="#participants" style={chipLink}>Teilnehmer ↓</a>
+        <a href="#criteria" style={chipLink}>Kategorien ↓</a>
+        <a href="#meta" style={chipLink}>Meta ↓</a>
+        <a href="#debug" style={chipLink}>Debug ↓</a>
       </div>
 
       <section style={{ marginTop: 18 }}>
@@ -248,9 +306,84 @@ export default function AdminTastingDetailPage({ params }: { params: { publicSlu
         )}
       </section>
 
+      {/* ✅ Teilnehmer-Anker */}
+      <section id="participants" style={sectionCard}>
+        <h2 style={{ fontSize: 16, margin: 0 }}>Teilnehmer</h2>
+        <p style={{ marginTop: 8, opacity: 0.75 }}>
+          (Option A) Hier kannst du später Teilnehmer-Liste/Löschen integrieren – oder du bleibst bei Deep-Links.
+        </p>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+          <a
+            href={`/join?slug=${encodeURIComponent(publicSlug)}`}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              padding: "10px 12px",
+              border: "1px solid rgba(0,0,0,0.2)",
+              borderRadius: 8,
+              textDecoration: "none",
+              color: "inherit",
+            }}
+          >
+            Join-Link öffnen
+          </a>
+
+          <a
+            href={`/t/${encodeURIComponent(publicSlug)}`}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              padding: "10px 12px",
+              border: "1px solid rgba(0,0,0,0.2)",
+              borderRadius: 8,
+              textDecoration: "none",
+              color: "inherit",
+            }}
+          >
+            Teilnehmer-Übersicht öffnen (/t/slug)
+          </a>
+        </div>
+
+        <p style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
+          Nächster Micro-Step (wenn du willst): API <code>/api/admin/list-participants</code> + Tabelle hier.
+        </p>
+      </section>
+
+      {/* ✅ Kriterien-Anker */}
+      <section id="criteria" style={sectionCard}>
+        <h2 style={{ fontSize: 16, margin: 0 }}>Bewertungskategorien</h2>
+        <p style={{ marginTop: 8, opacity: 0.75 }}>
+          (Option A) Kategorien sind aktuell im Tasting gespeichert (<code>criteria</code> Subcollection).
+          Hier können wir als nächstes ein kleines UI zum Hinzufügen/Umbenennen/Reihenfolge bauen.
+        </p>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+          <a
+            href={`/api/tasting/public?slug=${encodeURIComponent(publicSlug)}`}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              padding: "10px 12px",
+              border: "1px solid rgba(0,0,0,0.2)",
+              borderRadius: 8,
+              textDecoration: "none",
+              color: "inherit",
+            }}
+          >
+            Aktuelle Kategorien prüfen (public API)
+          </a>
+        </div>
+
+        <p style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
+          Nächster Micro-Step: Admin-Endpoint <code>/api/admin/update-criteria</code> + UI hier.
+        </p>
+      </section>
+
       <hr style={{ marginTop: 18, opacity: 0.2 }} />
 
-      <section>
+      {/* Meta Section with anchor */}
+      <section id="meta">
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>Meta-Daten</h2>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -298,7 +431,7 @@ export default function AdminTastingDetailPage({ params }: { params: { publicSlu
         </div>
 
         <p style={{ fontSize: 12, opacity: 0.7, marginTop: 10 }}>
-          Hinweis: Speichern braucht den Endpoint <code>/api/admin/update-tasting-meta</code> (siehe unten).
+          Hinweis: Speichern braucht den Endpoint <code>/api/admin/update-tasting-meta</code>.
         </p>
 
         <button
@@ -312,7 +445,7 @@ export default function AdminTastingDetailPage({ params }: { params: { publicSlu
 
       <hr style={{ marginTop: 18, opacity: 0.2 }} />
 
-      <section>
+      <section id="debug">
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>Aktueller Stand</h2>
         {!data ? (
           <p style={{ opacity: 0.7 }}>Noch nichts geladen.</p>
