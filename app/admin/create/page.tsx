@@ -1,10 +1,10 @@
 import { Suspense } from "react";
-import AdminCreateClient from "./AdminCreateClient";
+import AdminCreateTastingClient from "./AdminCreateTastingClient";
 
-export default function AdminCreatePage() {
+export default function Page() {
   return (
-    <Suspense fallback={<div style={{ padding: 20 }}>Lade…</div>}>
-      <AdminCreateClient />
+    <Suspense fallback={<main style={{ padding: 24, fontFamily: "system-ui" }}>Lade…</main>}>
+      <AdminCreateTastingClient />
     </Suspense>
   );
 }
