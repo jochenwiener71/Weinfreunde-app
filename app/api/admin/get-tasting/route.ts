@@ -22,7 +22,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Missing publicSlug" }, { status: 400 });
     }
 
-    const snap = await db
+    const snap = await db()
       .collection("tastings")
       .where("publicSlug", "==", publicSlug)
       .limit(1)
@@ -37,7 +37,7 @@ export async function GET(req: Request) {
     const data = doc.data() as any;
 
     // wines
-    const winesSnap = await db
+    const winesSnap = await db()
       .collection("tastings")
       .doc(tastingId)
       .collection("wines")
