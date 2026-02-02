@@ -1,12 +1,33 @@
 import { NextResponse } from "next/server";
+import { db } from "@/lib/firebaseAdmin";
 
 export async function GET() {
-  const b64 = String(process.env.FIREBASE_SERVICE_ACCOUNT_B64 ?? "").trim();
+  try {
+    // echter Firestore-Read → init wird garantiert ausgeführt
+    const snap = await db().collection("_health").limit(1).get();
 
-  return NextResponse.json({
-    hasB64: !!b64,
-    b64Len: b64.length,
-    b64StartsWith: b64.slice(0, 16),
-    nodeEnv: process.env.NODE_ENV,
-  });
+    return NextResponse.json({
+      ok: true,
+      message: "firebase admin + firestore OK",
+      env: {
+        hasServiceAccountB64: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_B64),
+        hasProjectId: Boolean(process.env.FIREBASE_PROJECT_ID),
+        hasClientEmail: Boolean(process.env.FIREBASE_CLIENT_EMAIL),
+        hasPrivateKey: Boolean(process.env.FIREBASE_PRIVATE_KEY),
+      },
+      firestore: {
+        readOk: true,
+        docs: snap.size,
+      },
+    });
+  } catch (e: any) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message: "firebase init failed",
+        error: e?.message ?? String(e),
+      },
+      { status: 500 }
+    );
+  }
 }
