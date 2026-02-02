@@ -9,6 +9,10 @@ type WineSlotPublic = {
   winery: string | null;
   grape: string | null;
   vintage: string | null;
+
+  // ✅ optional: bottle photo (wenn im wine doc gespeichert)
+  imageUrl: string | null;
+  imagePath: string | null;
 };
 
 export async function GET(req: Request) {
@@ -33,8 +37,10 @@ export async function GET(req: Request) {
 
     const doc = snap.docs[0];
     const tastingId = doc.id;
-    const data = doc.data() as any;
-    const status = String(data.status ?? "");
+    const t = doc.data() as any;
+
+    const status = String(t.status ?? "");
+    const wineCount = typeof t.wineCount === "number" ? t.wineCount : null;
 
     // wines
     const winesSnap = await db()
@@ -43,21 +49,29 @@ export async function GET(req: Request) {
       .collection("wines")
       .get();
 
-    // ✅ Details sichtbar in "open" UND "revealed"
+    // ✅ Details ab "open" ODER "revealed" anzeigen
     const showDetails = status === "open" || status === "revealed";
 
     const wines: WineSlotPublic[] = winesSnap.docs
       .map((w) => {
         const wd = w.data() as any;
+        const blindNumber = typeof wd.blindNumber === "number" ? wd.blindNumber : null;
+        const serveOrder = typeof wd.serveOrder === "number" ? wd.serveOrder : null;
 
         return {
           id: w.id,
-          blindNumber: typeof wd.blindNumber === "number" ? wd.blindNumber : null,
-          serveOrder: typeof wd.serveOrder === "number" ? wd.serveOrder : null,
+          blindNumber,
+          serveOrder,
+
+          // only if open/revealed
           ownerName: showDetails && typeof wd.ownerName === "string" ? wd.ownerName : null,
           winery: showDetails && typeof wd.winery === "string" ? wd.winery : null,
           grape: showDetails && typeof wd.grape === "string" ? wd.grape : null,
           vintage: showDetails && typeof wd.vintage === "string" ? wd.vintage : null,
+
+          // bottle photo
+          imageUrl: showDetails && typeof wd.imageUrl === "string" ? wd.imageUrl : null,
+          imagePath: showDetails && typeof wd.imagePath === "string" ? wd.imagePath : null,
         };
       })
       .sort((a, b) => (a.blindNumber ?? 999) - (b.blindNumber ?? 999));
@@ -67,7 +81,7 @@ export async function GET(req: Request) {
       publicSlug,
       tastingId,
       status,
-      wineCount: data.wineCount ?? wines.length,
+      wineCount: wineCount ?? wines.length,
       wines,
     });
   } catch (e: any) {
