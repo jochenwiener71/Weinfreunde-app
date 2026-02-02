@@ -2,27 +2,27 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-type Criterion = { id: string; label: string; order: number };
-
-type SummaryRow = {
-  blindNumber: number;
-  perCrit: Record<string, number | null>;
-  overall: number | null;
-};
-
-type SummaryResponse = {
+type Summary = {
   ok: boolean;
   publicSlug: string;
   tastingId: string;
   status: string | null;
   wineCount: number;
-  criteria: Criterion[];
-  rows: SummaryRow[];
-  ranking: SummaryRow[];
+  criteria: { id: string; label: string; order: number }[];
+  rows: {
+    blindNumber: number;
+    perCrit: Record<string, number | null>;
+    overall: number | null;
+  }[];
+  ranking: {
+    blindNumber: number;
+    perCrit: Record<string, number | null>;
+    overall: number | null;
+  }[];
   ratingCount: number;
 };
 
-type WineSlotPublic = {
+type WinePublic = {
   id: string;
   blindNumber: number | null;
   serveOrder: number | null;
@@ -30,6 +30,10 @@ type WineSlotPublic = {
   winery: string | null;
   grape: string | null;
   vintage: string | null;
+
+  // optional (falls du es später auch öffentlich liefern willst)
+  imageUrl?: string | null;
+  imagePath?: string | null;
 };
 
 type WinesResponse = {
@@ -38,489 +42,370 @@ type WinesResponse = {
   tastingId: string;
   status: string;
   wineCount: number;
-  wines: WineSlotPublic[];
+  wines: WinePublic[];
 };
 
-function sortKeyServeOrBlind(w: { serveOrder: number | null; blindNumber: number | null }) {
-  if (typeof w.serveOrder === "number") return w.serveOrder * 1000 + (w.blindNumber ?? 999);
-  return 999_000 + (w.blindNumber ?? 999);
+function fmt(v: any) {
+  if (v == null) return "—";
+  if (typeof v === "number") return String(Math.round(v * 100) / 100);
+  return String(v);
 }
 
-function sortKeyBlindOnly(blindNumber: number | null) {
-  return blindNumber ?? 999;
-}
+export default function TastingPage({ params }: { params: { slug: string } }) {
+  const slug = decodeURIComponent(params.slug || "");
 
-function fmtSecondsAgo(sec: number) {
-  if (sec < 1) return "gerade eben";
-  if (sec === 1) return "vor 1 Sekunde";
-  if (sec < 60) return `vor ${sec} Sekunden`;
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  if (m === 1) return s ? `vor 1 Minute ${s}s` : "vor 1 Minute";
-  return s ? `vor ${m} Minuten ${s}s` : `vor ${m} Minuten`;
-}
-
-export default function TastingResultPage({ params }: { params: { slug: string } }) {
-  const publicSlug = decodeURIComponent(params.slug);
-
-  const [summary, setSummary] = useState<SummaryResponse | null>(null);
+  const [summary, setSummary] = useState<Summary | null>(null);
   const [wines, setWines] = useState<WinesResponse | null>(null);
 
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [lastAt, setLastAt] = useState<string | null>(null);
 
-  // live badge state
-  const [isUpdating, setIsUpdating] = useState(false);
-  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
-  const [secondsAgo, setSecondsAgo] = useState<number>(0);
-
-  // admin UI gating
-  const [adminMode, setAdminMode] = useState(false);
-
-  // optional admin controls
-  const [adminSecret, setAdminSecret] = useState("");
-  const [adminMsg, setAdminMsg] = useState<string | null>(null);
-  const [adminLoading, setAdminLoading] = useState(false);
-
-  async function fetchAll() {
-    setErr(null);
-    setIsUpdating(true);
+  async function loadAll(silent = false) {
+    if (!silent) {
+      setLoading(true);
+      setMsg(null);
+    }
 
     try {
-      const [sRes, wRes] = await Promise.all([
-        fetch(`/api/tasting/summary?publicSlug=${encodeURIComponent(publicSlug)}`, { cache: "no-store" }),
-        fetch(`/api/tasting/wines?publicSlug=${encodeURIComponent(publicSlug)}`, { cache: "no-store" }),
+      const [resS, resW] = await Promise.all([
+        fetch(`/api/tasting/summary?publicSlug=${encodeURIComponent(slug)}`, { cache: "no-store" }),
+        fetch(`/api/tasting/wines?publicSlug=${encodeURIComponent(slug)}`, { cache: "no-store" }),
       ]);
 
-      const sText = await sRes.text();
-      const wText = await wRes.text();
+      const textS = await resS.text();
+      const textW = await resW.text();
 
-      const sJson = sText ? JSON.parse(sText) : {};
-      const wJson = wText ? JSON.parse(wText) : {};
+      const jsonS = textS ? (() => { try { return JSON.parse(textS); } catch { return { error: textS }; } })() : {};
+      const jsonW = textW ? (() => { try { return JSON.parse(textW); } catch { return { error: textW }; } })() : {};
 
-      if (!sRes.ok) throw new Error(sJson?.error ?? `Summary HTTP ${sRes.status}`);
-      if (!wRes.ok) throw new Error(wJson?.error ?? `Wines HTTP ${wRes.status}`);
+      if (!resS.ok) throw new Error(jsonS?.error ?? `Summary HTTP ${resS.status}`);
+      if (!resW.ok) throw new Error(jsonW?.error ?? `Wines HTTP ${resW.status}`);
 
-      setSummary(sJson);
-      setWines(wJson);
+      setSummary(jsonS as Summary);
+      setWines(jsonW as WinesResponse);
 
-      const now = Date.now();
-      setLastUpdatedAt(now);
-      setSecondsAgo(0);
+      const now = new Date();
+      setLastAt(now.toLocaleTimeString());
+      if (!silent) setMsg("Aktualisiert ✅");
     } catch (e: any) {
-      setErr(e?.message ?? "Fehler beim Laden");
+      setMsg(e?.message ?? "Fehler beim Laden");
     } finally {
-      setIsUpdating(false);
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
-  // auto refresh (polling) + adminMode via ?admin=1
+  // initial load + auto refresh
   useEffect(() => {
-    try {
-      const sp = new URLSearchParams(window.location.search);
-      setAdminMode(sp.get("admin") === "1");
-    } catch {
-      setAdminMode(false);
-    }
-
-    let alive = true;
-
-    (async () => {
-      if (!alive) return;
-      await fetchAll();
-    })();
-
-    const pollId = window.setInterval(() => {
-      fetchAll();
-    }, 3000);
-
-    return () => {
-      alive = false;
-      window.clearInterval(pollId);
-    };
+    loadAll(true);
+    const t = window.setInterval(() => loadAll(true), 8000); // alle 8s
+    return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [publicSlug]);
+  }, [slug]);
 
-  // seconds ticker for "last updated"
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      if (!lastUpdatedAt) return;
-      const diffSec = Math.max(0, Math.floor((Date.now() - lastUpdatedAt) / 1000));
-      setSecondsAgo(diffSec);
-    }, 1000);
-
-    return () => window.clearInterval(id);
-  }, [lastUpdatedAt]);
-
-  const criteriaLabels = useMemo(() => {
-    return (summary?.criteria ?? []).map((c) => c.label);
-  }, [summary]);
-
-  const winesByBlind = useMemo(() => {
-    const map = new Map<number, WineSlotPublic>();
+  const wineByBlind = useMemo(() => {
+    const map = new Map<number, WinePublic>();
     for (const w of wines?.wines ?? []) {
       if (typeof w.blindNumber === "number") map.set(w.blindNumber, w);
     }
     return map;
   }, [wines]);
 
-  const revealed = useMemo(() => {
-    const s = String(summary?.status ?? wines?.status ?? "").toLowerCase();
-    return s === "revealed";
-  }, [summary, wines]);
+  const top3 = useMemo(() => {
+    const r = (summary?.ranking ?? []).filter((x) => typeof x.overall === "number");
+    return r.slice(0, 3);
+  }, [summary]);
 
-  const statusText = useMemo(() => {
-    const s = String(summary?.status ?? wines?.status ?? "").trim();
-    return s || "unknown";
-  }, [summary, wines]);
-
-  const hasServeOrder = useMemo(() => {
-    return (wines?.wines ?? []).some((w) => typeof w.serveOrder === "number");
-  }, [wines]);
-
-  const rowsOrderedForDisplay = useMemo(() => {
-    const rows = (summary?.rows ?? []).slice();
-    if (!rows.length) return rows;
-
-    if (!hasServeOrder) {
-      return rows.sort((a, b) => sortKeyBlindOnly(a.blindNumber) - sortKeyBlindOnly(b.blindNumber));
-    }
-
-    const serveByBlind = new Map<number, number>();
-    for (const w of wines?.wines ?? []) {
-      if (typeof w.blindNumber === "number" && typeof w.serveOrder === "number") {
-        serveByBlind.set(w.blindNumber, w.serveOrder);
-      }
-    }
-
-    return rows.sort((a, b) => {
-      const aServe = serveByBlind.get(a.blindNumber) ?? null;
-      const bServe = serveByBlind.get(b.blindNumber) ?? null;
-
-      const aKey = sortKeyServeOrBlind({ serveOrder: aServe, blindNumber: a.blindNumber });
-      const bKey = sortKeyServeOrBlind({ serveOrder: bServe, blindNumber: b.blindNumber });
-
-      return aKey - bKey;
-    });
-  }, [summary, wines, hasServeOrder]);
-
-  async function setStatus(nextStatus: "open" | "revealed" | "closed" | "draft") {
-    setAdminMsg(null);
-    setAdminLoading(true);
-
-    try {
-      const res = await fetch("/api/admin/reveal", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-admin-secret": adminSecret.trim(),
-        },
-        body: JSON.stringify({
-          publicSlug,
-          status: nextStatus,
-        }),
-      });
-
-      const text = await res.text();
-      let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { error: text || `HTTP ${res.status}` };
-      }
-
-      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
-
-      setAdminMsg(`Status gesetzt: ${nextStatus} ✅`);
-      await fetchAll();
-    } catch (e: any) {
-      setAdminMsg(e?.message ?? "Admin-Fehler");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  const liveBadge = useMemo(() => {
-    // if never updated successfully yet
-    if (!lastUpdatedAt) {
-      return (
-        <span
-          style={{
-            padding: "4px 8px",
-            borderRadius: 999,
-            border: "1px solid rgba(0,0,0,0.15)",
-            fontSize: 12,
-            opacity: 0.85,
-          }}
-        >
-          Live: noch kein Stand
-        </span>
-      );
-    }
-
-    // updating badge
-    if (isUpdating) {
-      return (
-        <span
-          style={{
-            padding: "4px 8px",
-            borderRadius: 999,
-            border: "1px solid rgba(0,0,0,0.18)",
-            fontSize: 12,
-          }}
-        >
-          Live · aktualisiere…
-        </span>
-      );
-    }
-
-    // normal badge
-    return (
-      <span
-        style={{
-          padding: "4px 8px",
-          borderRadius: 999,
-          border: "1px solid rgba(0,0,0,0.15)",
-          fontSize: 12,
-          opacity: 0.9,
-        }}
-      >
-        Live · {fmtSecondsAgo(secondsAgo)}
-      </span>
-    );
-  }, [isUpdating, lastUpdatedAt, secondsAgo]);
+  const status = summary?.status ?? wines?.status ?? null;
+  const canShowDetails = (w: WinePublic | undefined) => {
+    // Wir zeigen Details, wenn sie vom Endpoint geliefert werden (unabhängig vom Status).
+    // Falls dein /api/tasting/wines Details nur bei "revealed" liefert, bleiben sie hier automatisch leer.
+    if (!w) return false;
+    return Boolean(w.ownerName || w.winery || w.grape || w.vintage || w.imageUrl);
+  };
 
   return (
-    <main style={{ padding: 20, fontFamily: "system-ui", maxWidth: 980, margin: "0 auto" }}>
-      <header style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
-        <div>
-          <h1 style={{ margin: 0 }}>Ergebnisse · {publicSlug}</h1>
+    <div style={pageStyle}>
+      {/* Background (wie Join) */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage: "url('/join-bg.jpg')",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          filter: "blur(2px)",
+          transform: "scale(1.06)",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background:
+            "linear-gradient(180deg, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.80) 65%, rgba(0,0,0,0.92) 100%)",
+        }}
+      />
 
-          <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-            {liveBadge}
-            <span style={{ opacity: 0.75 }}>
-              Status: <b>{statusText}</b> · Ratings: <b>{summary?.ratingCount ?? "—"}</b>
-            </span>
-          </div>
-
-          {hasServeOrder && (
-            <p style={{ margin: "6px 0 0 0", fontSize: 12, opacity: 0.7 }}>
-              Anzeige ist nach <b>Serve-Order</b> sortiert (wenn gesetzt), sonst nach Blindnummer.
-            </p>
-          )}
-        </div>
-
-        <button
-          onClick={fetchAll}
-          disabled={isUpdating}
-          style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.15)" }}
-        >
-          {isUpdating ? "Aktualisiere…" : "Jetzt aktualisieren"}
-        </button>
-      </header>
-
-      {loading && <p style={{ marginTop: 16 }}>Lade…</p>}
-      {err && (
-        <p style={{ marginTop: 16, color: "crimson", whiteSpace: "pre-wrap" }}>
-          {err}
-        </p>
-      )}
-
-      {/* ADMIN CONTROLS (hidden unless ?admin=1) */}
-      {adminMode && (
-        <section style={{ marginTop: 18, padding: 14, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10 }}>
-          <h2 style={{ margin: 0, fontSize: 16 }}>Admin</h2>
-          <p style={{ margin: "6px 0 12px 0", opacity: 0.75 }}>
-            Reveal direkt auslösen. (Admin sichtbar, weil URL <code>?admin=1</code> enthält.)
-          </p>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto auto", gap: 10 }}>
-            <input
-              value={adminSecret}
-              onChange={(e) => setAdminSecret(e.target.value)}
-              placeholder="ADMIN_SECRET"
-              autoCapitalize="none"
-              autoCorrect="off"
-              style={{ padding: 10, borderRadius: 8, border: "1px solid rgba(0,0,0,0.2)" }}
-            />
-
-            <button
-              onClick={() => setStatus("draft")}
-              disabled={!adminSecret.trim() || adminLoading}
-              style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.15)" }}
-            >
-              Draft
-            </button>
-
-            <button
-              onClick={() => setStatus("open")}
-              disabled={!adminSecret.trim() || adminLoading}
-              style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.15)" }}
-            >
-              Open
-            </button>
-
-            <button
-              onClick={() => setStatus("closed")}
-              disabled={!adminSecret.trim() || adminLoading}
-              style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.15)" }}
-            >
-              Closed
-            </button>
-
-            <button
-              onClick={() => setStatus("revealed")}
-              disabled={!adminSecret.trim() || adminLoading}
-              style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.15)" }}
-            >
-              Reveal
-            </button>
-          </div>
-
-          {adminMsg && (
-            <p style={{ marginTop: 10, color: adminMsg.includes("✅") ? "inherit" : "crimson", whiteSpace: "pre-wrap" }}>
-              {adminMsg}
-            </p>
-          )}
-        </section>
-      )}
-
-      {/* RANKING */}
-      {!!summary && (
-        <section style={{ marginTop: 18 }}>
-          <h2 style={{ fontSize: 16, marginBottom: 10 }}>Ranking (nach Ø Gesamt)</h2>
-
-          {summary.ranking?.length ? (
-            <div style={{ overflowX: "auto", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
-                <thead>
-                  <tr style={{ background: "rgba(0,0,0,0.04)" }}>
-                    <th style={{ textAlign: "left", padding: 10 }}>#</th>
-                    <th style={{ textAlign: "left", padding: 10 }}>Wein</th>
-                    {criteriaLabels.map((label) => (
-                      <th key={label} style={{ textAlign: "right", padding: 10 }}>{label}</th>
-                    ))}
-                    <th style={{ textAlign: "right", padding: 10 }}>Ø Gesamt</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {summary.ranking.map((r, idx) => {
-                    const w = winesByBlind.get(r.blindNumber);
-
-                    const wineTitle = revealed
-                      ? [
-                          w?.ownerName ? `(${w.ownerName})` : null,
-                          w?.winery ?? null,
-                          w?.grape ?? null,
-                          w?.vintage ?? null,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ") || `Wein ${r.blindNumber}`
-                      : `Wein ${r.blindNumber}`;
-
-                    return (
-                      <tr key={r.blindNumber} style={{ borderTop: "1px solid rgba(0,0,0,0.08)" }}>
-                        <td style={{ padding: 10, width: 40 }}>{idx + 1}</td>
-                        <td style={{ padding: 10 }}>
-                          <b>{r.blindNumber}</b>{" "}
-                          <span style={{ opacity: 0.85, marginLeft: 6 }}>{wineTitle}</span>
-                        </td>
-
-                        {criteriaLabels.map((label) => (
-                          <td key={label} style={{ padding: 10, textAlign: "right" }}>
-                            {r.perCrit?.[label] ?? "—"}
-                          </td>
-                        ))}
-
-                        <td style={{ padding: 10, textAlign: "right" }}>
-                          <b>{r.overall ?? "—"}</b>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+      <main style={wrapStyle}>
+        <div style={cardStyle}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <h1 style={{ margin: 0, fontSize: 22 }}>🍷 {slug}</h1>
+              <div style={{ marginTop: 6, opacity: 0.8, fontSize: 13 }}>
+                Status: <b>{status ?? "—"}</b> · Ratings: <b>{summary?.ratingCount ?? "—"}</b>
+                {lastAt ? <span> · zuletzt: {lastAt}</span> : null}
+              </div>
             </div>
-          ) : (
-            <p style={{ opacity: 0.75 }}>Noch kein Ranking (keine Durchschnittswerte vorhanden).</p>
+
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <a href={`/t/${encodeURIComponent(slug)}/wine/1`} style={primaryBtn}>
+                Zur Bewertung →
+              </a>
+              <button onClick={() => loadAll(false)} disabled={loading} style={ghostBtn}>
+                {loading ? "…" : "Refresh"}
+              </button>
+            </div>
+          </div>
+
+          {msg && (
+            <p style={{ marginTop: 12, color: msg.includes("✅") ? "white" : "#ffb4b4" }}>
+              {msg}
+            </p>
           )}
-        </section>
-      )}
 
-      {/* ALLE WEINE */}
-      {!!summary && (
-        <section style={{ marginTop: 18 }}>
-          <h2 style={{ fontSize: 16, marginBottom: 10 }}>
-            Alle Weine {hasServeOrder ? "(Sortierung: Serve-Order)" : "(Sortierung: Blindnummer)"}
-          </h2>
+          {/* TOP 3 */}
+          <section style={{ marginTop: 16 }}>
+            <h2 style={{ margin: "0 0 10px 0", fontSize: 16, opacity: 0.95 }}>Top 3 (aktueller Stand)</h2>
 
-          <div style={{ overflowX: "auto", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 780 }}>
-              <thead>
-                <tr style={{ background: "rgba(0,0,0,0.04)" }}>
-                  <th style={{ textAlign: "left", padding: 10, width: 90 }}>Blind #</th>
-                  {hasServeOrder && <th style={{ textAlign: "right", padding: 10, width: 90 }}>Serve</th>}
-                  <th style={{ textAlign: "left", padding: 10 }}>Details (nach Reveal)</th>
-                  {criteriaLabels.map((label) => (
-                    <th key={label} style={{ textAlign: "right", padding: 10 }}>{label}</th>
-                  ))}
-                  <th style={{ textAlign: "right", padding: 10 }}>Ø Gesamt</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rowsOrderedForDisplay.map((r) => {
-                  const w = winesByBlind.get(r.blindNumber);
-
-                  const details = revealed
-                    ? [
-                        w?.ownerName ? `Owner: ${w.ownerName}` : null,
-                        w?.winery ? `Weingut: ${w.winery}` : null,
-                        w?.grape ? `Rebsorte: ${w.grape}` : null,
-                        w?.vintage ? `Jahrgang: ${w.vintage}` : null,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")
-                    : "—";
+            {!summary ? (
+              <p style={{ opacity: 0.8, margin: 0 }}>Lade…</p>
+            ) : top3.length === 0 ? (
+              <p style={{ opacity: 0.8, margin: 0 }}>
+                Noch kein Ranking verfügbar (es müssen Bewertungen eingehen).
+              </p>
+            ) : (
+              <div style={{ display: "grid", gap: 12 }}>
+                {top3.map((r, idx) => {
+                  const w = wineByBlind.get(r.blindNumber);
+                  const hasDetails = canShowDetails(w);
 
                   return (
-                    <tr key={r.blindNumber} style={{ borderTop: "1px solid rgba(0,0,0,0.08)" }}>
-                      <td style={{ padding: 10 }}>
-                        <b>{r.blindNumber}</b>
-                      </td>
+                    <div key={r.blindNumber} style={topCardStyle}>
+                      <div style={{ display: "flex", gap: 12, alignItems: "stretch" }}>
+                        {/* Optional image */}
+                        {w?.imageUrl ? (
+                          <img
+                            src={w.imageUrl}
+                            alt={`Wein ${r.blindNumber}`}
+                            style={{
+                              width: 84,
+                              height: 120,
+                              objectFit: "cover",
+                              borderRadius: 10,
+                              border: "1px solid rgba(255,255,255,0.18)",
+                            }}
+                          />
+                        ) : (
+                          <div
+                            style={{
+                              width: 84,
+                              height: 120,
+                              borderRadius: 10,
+                              border: "1px dashed rgba(255,255,255,0.22)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              opacity: 0.75,
+                              fontSize: 12,
+                            }}
+                          >
+                            kein Bild
+                          </div>
+                        )}
 
-                      {hasServeOrder && (
-                        <td style={{ padding: 10, textAlign: "right" }}>
-                          {typeof w?.serveOrder === "number" ? w.serveOrder : "—"}
-                        </td>
-                      )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                            <div>
+                              <div style={{ fontSize: 12, opacity: 0.8 }}>
+                                #{idx + 1} · Wein <b>#{r.blindNumber}</b>
+                              </div>
+                              <div style={{ marginTop: 4, fontSize: 16, fontWeight: 800 }}>
+                                Ø Gesamt: {fmt(r.overall)}
+                              </div>
+                            </div>
 
-                      <td style={{ padding: 10, opacity: revealed ? 0.9 : 0.6 }}>
-                        {details || "—"}
-                      </td>
+                            <a
+                              href={`/t/${encodeURIComponent(slug)}/wine/${r.blindNumber}`}
+                              style={{ ...pillLinkStyle }}
+                            >
+                              bewerten →
+                            </a>
+                          </div>
 
-                      {criteriaLabels.map((label) => (
-                        <td key={label} style={{ padding: 10, textAlign: "right" }}>
-                          {r.perCrit?.[label] ?? "—"}
-                        </td>
-                      ))}
+                          {/* Details block */}
+                          {hasDetails ? (
+                            <div style={{ marginTop: 10, display: "grid", gap: 6, fontSize: 13 }}>
+                              {w?.winery ? <div><b>Weingut:</b> {w.winery}</div> : null}
+                              {/* optional "Name Wein" falls du es später ergänzt */}
+                              {w?.grape ? <div><b>Rebsorte:</b> {w.grape}</div> : null}
+                              {w?.vintage ? <div><b>Jahrgang:</b> {w.vintage}</div> : null}
+                              {w?.ownerName ? <div><b>Mitgebracht von:</b> {w.ownerName}</div> : null}
+                            </div>
+                          ) : (
+                            <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
+                              Details erscheinen, sobald der Admin sie einträgt (oder nach Reveal, je nach Endpoint-Logik).
+                            </div>
+                          )}
 
-                      <td style={{ padding: 10, textAlign: "right" }}>
-                        <b>{r.overall ?? "—"}</b>
-                      </td>
-                    </tr>
+                          {/* per criteria */}
+                          <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                            {Object.entries(r.perCrit ?? {}).map(([k, v]) => (
+                              <span key={k} style={chipStyle}>
+                                {k}: <b style={{ marginLeft: 6 }}>{v == null ? "—" : fmt(v)}</b>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            )}
+          </section>
 
-          <p style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-            Hinweis: Weindetails erscheinen nur nach <b>Reveal</b>. Serve-Order ist optional und wird nur angezeigt, wenn mindestens
-            ein Wein eine Serve-Order hat.
-          </p>
-        </section>
-      )}
-    </main>
+          {/* LIST */}
+          <section style={{ marginTop: 18 }}>
+            <h2 style={{ margin: "0 0 10px 0", fontSize: 16, opacity: 0.95 }}>Alle Weine</h2>
+
+            <div style={{ display: "grid", gap: 10 }}>
+              {Array.from({ length: summary?.wineCount ?? wines?.wineCount ?? 10 }, (_, i) => i + 1).map((bn) => {
+                const w = wineByBlind.get(bn);
+                const details = canShowDetails(w);
+
+                return (
+                  <a
+                    key={bn}
+                    href={`/t/${encodeURIComponent(slug)}/wine/${bn}`}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      padding: "12px 12px",
+                      borderRadius: 12,
+                      textDecoration: "none",
+                      color: "white",
+                      background: "rgba(255,255,255,0.08)",
+                      border: "1px solid rgba(255,255,255,0.14)",
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 800 }}>Wein #{bn}</div>
+                      <div style={{ fontSize: 12, opacity: 0.75, marginTop: 2 }}>
+                        {details
+                          ? `${w?.winery ?? "—"} · ${w?.grape ?? "—"} · ${w?.vintage ?? "—"}`
+                          : "Details folgen…"}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 12, opacity: 0.75, alignSelf: "center" }}>
+                      öffnen →
+                    </div>
+                  </a>
+                );
+              })}
+            </div>
+
+            <p style={{ marginTop: 12, fontSize: 12, opacity: 0.65 }}>
+              Auto-Refresh ist aktiv. Wenn du willst, stelle ich die Frequenz auf 3s/5s/15s um.
+            </p>
+          </section>
+        </div>
+      </main>
+    </div>
   );
 }
+
+/* Styles */
+const pageStyle: React.CSSProperties = {
+  minHeight: "100vh",
+  position: "relative",
+  overflow: "hidden",
+  fontFamily: "system-ui, -apple-system, BlinkMacSystemFont",
+};
+
+const wrapStyle: React.CSSProperties = {
+  position: "relative",
+  zIndex: 1,
+  minHeight: "100vh",
+  display: "flex",
+  justifyContent: "center",
+  padding: 18,
+};
+
+const cardStyle: React.CSSProperties = {
+  width: "100%",
+  maxWidth: 920,
+  marginTop: 14,
+  background: "rgba(20,20,20,0.72)",
+  backdropFilter: "blur(7px)",
+  borderRadius: 18,
+  padding: 18,
+  boxShadow: "0 20px 60px rgba(0,0,0,0.55)",
+  color: "white",
+  border: "1px solid rgba(255,255,255,0.10)",
+};
+
+const topCardStyle: React.CSSProperties = {
+  background: "rgba(255,255,255,0.08)",
+  border: "1px solid rgba(255,255,255,0.14)",
+  borderRadius: 16,
+  padding: 14,
+};
+
+const chipStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "6px 10px",
+  borderRadius: 999,
+  background: "rgba(0,0,0,0.22)",
+  border: "1px solid rgba(255,255,255,0.14)",
+  fontSize: 12,
+  opacity: 0.95,
+};
+
+const primaryBtn: React.CSSProperties = {
+  display: "inline-block",
+  textAlign: "center",
+  padding: "10px 12px",
+  borderRadius: 10,
+  textDecoration: "none",
+  color: "white",
+  fontWeight: 800,
+  background: "linear-gradient(135deg, #8e0e00, #c0392b)",
+  border: "1px solid rgba(255,255,255,0.12)",
+};
+
+const ghostBtn: React.CSSProperties = {
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: "1px solid rgba(255,255,255,0.18)",
+  background: "rgba(255,255,255,0.10)",
+  color: "white",
+  fontWeight: 700,
+};
+
+const pillLinkStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "8px 10px",
+  borderRadius: 999,
+  textDecoration: "none",
+  color: "white",
+  fontSize: 12,
+  fontWeight: 800,
+  background: "rgba(255,255,255,0.12)",
+  border: "1px solid rgba(255,255,255,0.18)",
+};
