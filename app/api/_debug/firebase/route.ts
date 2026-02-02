@@ -6,6 +6,7 @@ export async function GET() {
   return NextResponse.json({
     hasB64: !!b64,
     b64Len: b64.length,
-    b64StartsWith: b64.slice(0, 12),
+    b64StartsWith: b64.slice(0, 16),
+    nodeEnv: process.env.NODE_ENV,
   });
 }
