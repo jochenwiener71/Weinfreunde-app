@@ -10,6 +10,10 @@ type WineSlot = {
   winery: string | null;
   grape: string | null;
   vintage: string | null;
+
+  // ✅ NEW: bottle photo
+  imageUrl: string | null;
+  imagePath: string | null;
 };
 
 export async function GET(req: Request) {
@@ -55,6 +59,10 @@ export async function GET(req: Request) {
           winery: typeof wd.winery === "string" ? wd.winery : null,
           grape: typeof wd.grape === "string" ? wd.grape : null,
           vintage: typeof wd.vintage === "string" ? wd.vintage : null,
+
+          // ✅ NEW
+          imageUrl: typeof wd.imageUrl === "string" ? wd.imageUrl : null,
+          imagePath: typeof wd.imagePath === "string" ? wd.imagePath : null,
         };
       })
       .sort((a, b) => (a.blindNumber ?? 999) - (b.blindNumber ?? 999));
@@ -71,9 +79,6 @@ export async function GET(req: Request) {
       wines,
     });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message ?? "Error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message ?? "Error" }, { status: 500 });
   }
 }
