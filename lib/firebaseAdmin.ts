@@ -92,8 +92,15 @@ function getCredentialFromEnv(): admin.credential.Credential {
 function init() {
   if (admin.apps.length === 0) {
     const credential = getCredentialFromEnv();
-    admin.initializeApp({ credential });
+
+    // ✅ Storage Support (für Bottle-Foto Uploads)
+    // Wichtig: Setze in Vercel ENV: FIREBASE_STORAGE_BUCKET = "<projectId>.appspot.com"
+    admin.initializeApp({
+      credential,
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+    });
   }
+
   if (!_db) _db = admin.firestore();
 }
 
