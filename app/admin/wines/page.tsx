@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 type WineSlot = {
   id: string;
@@ -11,7 +11,7 @@ type WineSlot = {
   grape: string | null;
   vintage: string | null;
 
-  // ✅ NEW: bottle photo persisted in Firestore
+  // ✅ bottle photo persisted in Firestore
   imageUrl: string | null;
   imagePath: string | null;
 };
@@ -27,6 +27,12 @@ type AdminGetTastingResponse = {
   wines: WineSlot[];
 };
 
+function maskPath(p: string) {
+  if (!p) return "";
+  if (p.length <= 34) return p;
+  return `${p.slice(0, 16)}…${p.slice(-16)}`;
+}
+
 export default function AdminWinesPage() {
   const [adminSecret, setAdminSecret] = useState("");
   const [publicSlug, setPublicSlug] = useState("");
@@ -38,6 +44,7 @@ export default function AdminWinesPage() {
   // local editable copy
   const [rows, setRows] = useState<WineSlot[]>([]);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [uploadingId, setUploadingId] = useState<string | null>(null);
 
   const canLoad = useMemo(() => {
     return adminSecret.trim().length > 0 && publicSlug.trim().length > 0;
@@ -93,7 +100,6 @@ export default function AdminWinesPage() {
     setSavingId(r.id);
 
     try {
-      // ✅ IMPORTANT: include imageUrl + imagePath in body
       const body = {
         publicSlug: publicSlug.trim(),
         wineId: r.id,
@@ -133,6 +139,80 @@ export default function AdminWinesPage() {
       setMsg(e?.message ?? "Speichern fehlgeschlagen");
     } finally {
       setSavingId(null);
+    }
+  }
+
+  async function uploadWineImage(wineId: string, file: File) {
+    const fd = new FormData();
+    fd.append("file", file);
+
+    const res = await fetch(
+      `/api/admin/upload-wine-image?publicSlug=${encodeURIComponent(publicSlug.trim())}&wineId=${encodeURIComponent(
+        wineId
+      )}`,
+      {
+        method: "POST",
+        headers: { "x-admin-secret": adminSecret.trim() },
+        body: fd,
+      }
+    );
+
+    const text = await res.text();
+    let json: any = {};
+    try {
+      json = text ? JSON.parse(text) : {};
+    } catch {
+      json = { error: text || `HTTP ${res.status}` };
+    }
+
+    if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+
+    return { imageUrl: String(json.imageUrl ?? ""), imagePath: String(json.imagePath ?? "") };
+  }
+
+  async function onPickFile(wineId: string, file: File | null) {
+    if (!file) return;
+    if (!adminSecret.trim() || !publicSlug.trim()) {
+      setMsg("Bitte erst ADMIN_SECRET + publicSlug eingeben und Laden ✅");
+      return;
+    }
+
+    setMsg(null);
+    setUploadingId(wineId);
+
+    try {
+      // 1) upload to Storage via API
+      const { imageUrl, imagePath } = await uploadWineImage(wineId, file);
+
+      // 2) update local row immediately (preview stays)
+      const current = rows.find((x) => x.id === wineId);
+      updateRow(wineId, { imageUrl, imagePath });
+
+      // 3) persist in Firestore via update-wine
+      if (current) {
+        await saveRow({ ...current, imageUrl, imagePath });
+      } else {
+        // fallback: still persist via lightweight body
+        await fetch("/api/admin/update-wine", {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "x-admin-secret": adminSecret.trim(),
+          },
+          body: JSON.stringify({
+            publicSlug: publicSlug.trim(),
+            wineId,
+            imageUrl,
+            imagePath,
+          }),
+        });
+      }
+
+      setMsg("Upload + gespeichert ✅");
+    } catch (e: any) {
+      setMsg(e?.message ?? "Upload fehlgeschlagen");
+    } finally {
+      setUploadingId(null);
     }
   }
 
@@ -197,7 +277,7 @@ export default function AdminWinesPage() {
                   <th style={{ textAlign: "left", padding: 10 }}>Weingut</th>
                   <th style={{ textAlign: "left", padding: 10, width: 180 }}>Rebsorte</th>
                   <th style={{ textAlign: "left", padding: 10, width: 110 }}>Jahrgang</th>
-                  <th style={{ textAlign: "left", padding: 10, width: 140 }}>Foto</th>
+                  <th style={{ textAlign: "left", padding: 10, width: 320 }}>Foto</th>
                   <th style={{ textAlign: "right", padding: 10, width: 140 }}>Aktion</th>
                 </tr>
               </thead>
@@ -265,30 +345,72 @@ export default function AdminWinesPage() {
                       />
                     </td>
 
-                    {/* ✅ Foto preview from persisted imageUrl */}
+                    {/* Foto (preview from persisted imageUrl) + Upload */}
                     <td style={{ padding: 10 }}>
-                      {r.imageUrl ? (
-                        <img
-                          src={r.imageUrl}
-                          alt="Flasche"
-                          style={{
-                            width: 44,
-                            height: 66,
-                            objectFit: "cover",
-                            borderRadius: 8,
-                            border: "1px solid rgba(0,0,0,0.15)",
-                            display: "block",
-                          }}
-                        />
-                      ) : (
-                        <span style={{ opacity: 0.6 }}>kein Bild</span>
-                      )}
-                      {/* optional tiny hint */}
-                      {r.imagePath ? (
-                        <div style={{ fontSize: 10, opacity: 0.55, marginTop: 6, wordBreak: "break-all" }}>
-                          {r.imagePath}
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        {r.imageUrl ? (
+                          <img
+                            src={r.imageUrl}
+                            alt="Flasche"
+                            style={{
+                              width: 44,
+                              height: 66,
+                              objectFit: "cover",
+                              borderRadius: 8,
+                              border: "1px solid rgba(0,0,0,0.15)",
+                              display: "block",
+                              flex: "0 0 auto",
+                            }}
+                          />
+                        ) : (
+                          <div
+                            style={{
+                              width: 44,
+                              height: 66,
+                              borderRadius: 8,
+                              border: "1px dashed rgba(0,0,0,0.2)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              opacity: 0.6,
+                              fontSize: 11,
+                              flex: "0 0 auto",
+                            }}
+                          >
+                            kein Bild
+                          </div>
+                        )}
+
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 220 }}>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => onPickFile(r.id, e.target.files?.[0] ?? null)}
+                            disabled={!adminSecret.trim() || uploadingId === r.id}
+                          />
+
+                          {uploadingId === r.id ? (
+                            <span style={{ fontSize: 12, opacity: 0.75 }}>Upload…</span>
+                          ) : r.imageUrl ? (
+                            <a
+                              href={r.imageUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ fontSize: 12 }}
+                            >
+                              Bild öffnen
+                            </a>
+                          ) : (
+                            <span style={{ fontSize: 12, opacity: 0.6 }}>—</span>
+                          )}
+
+                          {r.imagePath ? (
+                            <div style={{ fontSize: 10, opacity: 0.55, wordBreak: "break-all" }}>
+                              {maskPath(r.imagePath)}
+                            </div>
+                          ) : null}
                         </div>
-                      ) : null}
+                      </div>
                     </td>
 
                     <td style={{ padding: 10, textAlign: "right" }}>
