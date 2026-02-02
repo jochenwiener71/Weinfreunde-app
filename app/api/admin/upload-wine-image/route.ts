@@ -3,17 +3,34 @@ import admin from "firebase-admin";
 import { db } from "@/lib/firebaseAdmin";
 import { requireAdminSecret } from "@/lib/security";
 
-function extFromMime(mime: string) {
-  const m = (mime || "").toLowerCase();
-  if (m.includes("png")) return "png";
-  if (m.includes("webp")) return "webp";
-  if (m.includes("gif")) return "gif";
-  return "jpg"; // default for jpeg/jpg/unknown images
+function pickExt(contentType: string | null, fallbackName?: string | null) {
+  const ct = (contentType || "").toLowerCase();
+  if (ct.includes("png")) return "png";
+  if (ct.includes("webp")) return "webp";
+  if (ct.includes("jpeg") || ct.includes("jpg")) return "jpg";
+
+  const name = (fallbackName || "").toLowerCase();
+  const m = name.match(/\.(png|webp|jpg|jpeg)$/);
+  if (m?.[1]) return m[1] === "jpeg" ? "jpg" : m[1];
+
+  return "jpg";
 }
+
+function randomToken() {
+  // download token used by Firebase Storage "alt=media&token=..."
+  return (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`).replace(/[^a-zA-Z0-9-]/g, "");
+}
+
+export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   try {
     requireAdminSecret(req);
+
+    const bucketName = String(process.env.FIREBASE_STORAGE_BUCKET ?? "").trim();
+    if (!bucketName) {
+      return NextResponse.json({ error: "Missing FIREBASE_STORAGE_BUCKET env var" }, { status: 500 });
+    }
 
     const form = await req.formData();
 
@@ -21,14 +38,16 @@ export async function POST(req: Request) {
     const wineId = String(form.get("wineId") ?? "").trim();
     const file = form.get("file");
 
-    if (!publicSlug || !wineId) {
-      return NextResponse.json({ error: "Missing publicSlug or wineId" }, { status: 400 });
-    }
-    if (!(file instanceof File)) {
+    if (!publicSlug) return NextResponse.json({ error: "Missing publicSlug" }, { status: 400 });
+    if (!wineId) return NextResponse.json({ error: "Missing wineId" }, { status: 400 });
+    if (!file || typeof file === "string") {
       return NextResponse.json({ error: "Missing file" }, { status: 400 });
     }
 
-    // find tasting
+    // Ensure Firebase Admin is initialized (your db() does init internally)
+    db();
+
+    // Find tasting by publicSlug
     const tSnap = await db()
       .collection("tastings")
       .where("publicSlug", "==", publicSlug)
@@ -42,46 +61,66 @@ export async function POST(req: Request) {
     const tDoc = tSnap.docs[0];
     const tastingId = tDoc.id;
 
-    // upload to Firebase Storage
-    const bucket = admin.storage().bucket(); // uses FIREBASE_STORAGE_BUCKET from init()
-    const mime = file.type || "image/jpeg";
-    const ext = extFromMime(mime);
+    // Validate wine doc exists
+    const wineRef = tDoc.ref.collection("wines").doc(wineId);
+    const wineSnap = await wineRef.get();
+    if (!wineSnap.exists) {
+      return NextResponse.json({ error: "Wine not found" }, { status: 404 });
+    }
 
-    const objectPath = `tastings/${tastingId}/wines/${wineId}/bottle.${ext}`;
-    const buf = Buffer.from(await file.arrayBuffer());
+    // Read file buffer
+    const blob = file as Blob;
+    const ab = await blob.arrayBuffer();
+    const buf = Buffer.from(ab);
 
+    const contentType = (blob as any)?.type ? String((blob as any).type) : "image/jpeg";
+    const ext = pickExt(contentType, (file as any)?.name ?? null);
+
+    const objectPath = `wines/${tastingId}/${wineId}.${ext}`;
+
+    // Upload to Firebase Storage via Admin SDK
+    const bucket = admin.storage().bucket(bucketName);
     const gcsFile = bucket.file(objectPath);
 
+    const token = randomToken();
+
     await gcsFile.save(buf, {
-      contentType: mime,
       resumable: false,
       metadata: {
-        cacheControl: "public, max-age=31536000", // 1 year cache
+        contentType,
+        cacheControl: "public, max-age=31536000",
+        metadata: {
+          firebaseStorageDownloadTokens: token,
+        },
       },
     });
 
-    // create a long-lived signed READ url (no public bucket required)
-    const [signedUrl] = await gcsFile.getSignedUrl({
-      action: "read",
-      // pick a far future date
-      expires: "2036-01-01",
+    // Build Firebase-style download URL
+    const encodedPath = encodeURIComponent(objectPath);
+    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodedPath}?alt=media&token=${token}`;
+
+    // Persist URL on the wine document
+    await wineRef.set(
+      {
+        imageUrl,
+        imagePath: objectPath,
+        imageUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    return NextResponse.json({
+      ok: true,
+      publicSlug,
+      tastingId,
+      wineId,
+      imageUrl,
+      imagePath: objectPath,
     });
-
-    // store URL on the wine doc
-    await tDoc.ref
-      .collection("wines")
-      .doc(wineId)
-      .set(
-        {
-          imageUrl: signedUrl,
-          imagePath: objectPath,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-    return NextResponse.json({ ok: true, imageUrl: signedUrl, imagePath: objectPath });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Upload failed" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message ?? "Upload failed" },
+      { status: 500 }
+    );
   }
 }
