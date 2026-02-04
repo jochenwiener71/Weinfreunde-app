@@ -22,7 +22,6 @@ function btnStyle(disabled?: boolean): React.CSSProperties {
 
 export default function AdminPage() {
   const [publicSlug, setPublicSlug] = useState("");
-
   const slug = useMemo(() => publicSlug.trim(), [publicSlug]);
 
   const joinUrl = useMemo(() => {
@@ -35,30 +34,10 @@ export default function AdminPage() {
     return `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encode(joinUrl)}`;
   }, [joinUrl]);
 
-  // ✅ Deep links (FIXED to existing routes)
-  const manageTastingHref = useMemo(() => {
-    if (!slug) return "";
-    // Es gibt bei dir KEIN /admin/tasting — daher auf eine existierende Admin-Seite gehen:
-    // Option A: Weine (arbeitet ohnehin mit publicSlug im UI)
-    return `/admin/wines`;
-    // Wenn deine /admin/wines Seite später publicSlug via query nutzen soll:
-    // return `/admin/wines?publicSlug=${encode(slug)}`;
-  }, [slug]);
-
-  const manageParticipantsHref = useMemo(() => {
-    if (!slug) return "";
-    // ✅ Existiert bei dir: app/admin/participants/[slug]/page.tsx
-    return `/admin/participants/${encode(slug)}`;
-  }, [slug]);
-
-  const manageCriteriaHref = useMemo(() => {
-    if (!slug) return "";
-    // Falls du (noch) keine eigene Criteria-Admin-UI hast, nicht auf 404 linken:
-    // Du kannst später z.B. /admin/criteria/[slug] bauen.
-    return `/admin/create`;
-    // Alternativ:
-    // return `/admin/wines`;
-  }, [slug]);
+  // ✅ EXISTIERENDE ROUTEN
+  const manageTastingHref = useMemo(() => (!slug ? "" : `/admin/tasting/${encode(slug)}`), [slug]);
+  const manageParticipantsHref = useMemo(() => (!slug ? "" : `/admin/participants/${encode(slug)}`), [slug]);
+  const manageCriteriaHref = useMemo(() => (!slug ? "" : `/admin/criteria/${encode(slug)}`), [slug]);
 
   async function copy(text: string) {
     try {
@@ -83,7 +62,7 @@ export default function AdminPage() {
         Schnellzugriff: Tastings verwalten, QR-Code erzeugen, Weine pflegen.
       </p>
 
-      {/* ✅ GLOBAL QUICK LINKS */}
+      {/* GLOBAL */}
       <section style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
         <Link href="/admin/tastings" style={btnStyle(false)}>
           Tastings verwalten
@@ -102,15 +81,8 @@ export default function AdminPage() {
         </Link>
       </section>
 
-      {/* ✅ CONTEXT QUICK ACTIONS (for a specific slug) */}
-      <section
-        style={{
-          marginTop: 18,
-          border: "1px solid rgba(0,0,0,0.12)",
-          borderRadius: 12,
-          padding: 16,
-        }}
-      >
+      {/* CONTEXT */}
+      <section style={{ marginTop: 18, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 12, padding: 16 }}>
         <h2 style={{ marginTop: 0, fontSize: 16 }}>Tasting-Kontext (publicSlug)</h2>
 
         <label style={{ display: "block" }}>
@@ -118,7 +90,7 @@ export default function AdminPage() {
           <input
             value={publicSlug}
             onChange={(e) => setPublicSlug(e.target.value)}
-            placeholder="weinfreunde"
+            placeholder="weinfreunde-feb26"
             style={{ width: "100%", padding: 10, marginTop: 6 }}
             autoCapitalize="none"
             autoCorrect="off"
@@ -145,10 +117,7 @@ export default function AdminPage() {
           <button
             onClick={() => joinUrl && copy(joinUrl)}
             disabled={!slug}
-            style={{
-              ...btnStyle(!slug),
-              cursor: !slug ? "not-allowed" : "pointer",
-            }}
+            style={{ ...btnStyle(!slug), cursor: !slug ? "not-allowed" : "pointer" }}
           >
             Join-Link kopieren
           </button>
@@ -156,16 +125,12 @@ export default function AdminPage() {
           <button
             onClick={openPrint}
             disabled={!slug}
-            style={{
-              ...btnStyle(!slug),
-              cursor: !slug ? "not-allowed" : "pointer",
-            }}
+            style={{ ...btnStyle(!slug), cursor: !slug ? "not-allowed" : "pointer" }}
           >
             QR Druckansicht
           </button>
         </div>
 
-        {/* ✅ QR BOX */}
         {!joinUrl ? (
           <p style={{ margin: "12px 0 0 0", fontSize: 13, opacity: 0.7 }}>
             Slug eingeben → Join-Link / QR / Admin-Links werden aktiv.
@@ -188,13 +153,11 @@ export default function AdminPage() {
                 style={{ border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8 }}
               />
 
-              <div style={{ fontSize: 12, opacity: 0.7, maxWidth: 480 }}>
+              <div style={{ fontSize: 12, opacity: 0.7, maxWidth: 520 }}>
                 <div style={{ marginBottom: 6 }}>
-                  <strong>Hinweis:</strong> „Teilnehmer“ ist ein Deep-Link auf{" "}
-                  <code>/admin/participants/[slug]</code>.
-                </div>
-                <div>
-                  „Kategorien“ ist aktuell nur ein Shortcut (bis wir eine echte Criteria-Admin-Seite bauen).
+                  <strong>Info:</strong> Links gehen auf deine existierenden Seiten:
+                  <code> /admin/tasting/[slug]</code>, <code>/admin/participants/[slug]</code>,{" "}
+                  <code>/admin/criteria/[slug]</code>.
                 </div>
               </div>
             </div>
