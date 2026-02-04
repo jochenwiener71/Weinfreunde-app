@@ -35,20 +35,29 @@ export default function AdminPage() {
     return `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encode(joinUrl)}`;
   }, [joinUrl]);
 
-  // ✅ Deep links (fixed to real routes)
+  // ✅ Deep links (FIXED to existing routes)
   const manageTastingHref = useMemo(() => {
     if (!slug) return "";
-    return `/admin/tasting/${encode(slug)}`;
+    // Es gibt bei dir KEIN /admin/tasting — daher auf eine existierende Admin-Seite gehen:
+    // Option A: Weine (arbeitet ohnehin mit publicSlug im UI)
+    return `/admin/wines`;
+    // Wenn deine /admin/wines Seite später publicSlug via query nutzen soll:
+    // return `/admin/wines?publicSlug=${encode(slug)}`;
   }, [slug]);
 
   const manageParticipantsHref = useMemo(() => {
     if (!slug) return "";
+    // ✅ Existiert bei dir: app/admin/participants/[slug]/page.tsx
     return `/admin/participants/${encode(slug)}`;
   }, [slug]);
 
   const manageCriteriaHref = useMemo(() => {
     if (!slug) return "";
-    return `/admin/criteria/${encode(slug)}`;
+    // Falls du (noch) keine eigene Criteria-Admin-UI hast, nicht auf 404 linken:
+    // Du kannst später z.B. /admin/criteria/[slug] bauen.
+    return `/admin/create`;
+    // Alternativ:
+    // return `/admin/wines`;
   }, [slug]);
 
   async function copy(text: string) {
@@ -109,7 +118,7 @@ export default function AdminPage() {
           <input
             value={publicSlug}
             onChange={(e) => setPublicSlug(e.target.value)}
-            placeholder="weinfreunde-feb26"
+            placeholder="weinfreunde"
             style={{ width: "100%", padding: 10, marginTop: 6 }}
             autoCapitalize="none"
             autoCorrect="off"
@@ -179,13 +188,13 @@ export default function AdminPage() {
                 style={{ border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8 }}
               />
 
-              <div style={{ fontSize: 12, opacity: 0.7, maxWidth: 520 }}>
+              <div style={{ fontSize: 12, opacity: 0.7, maxWidth: 480 }}>
                 <div style={{ marginBottom: 6 }}>
-                  <strong>Hinweis:</strong> Die Admin-Links gehen jetzt auf echte Seiten:
-                  <div style={{ marginTop: 6, lineHeight: 1.5 }}>
-                    <code>/admin/tasting/[slug]</code> · <code>/admin/participants/[slug]</code> ·{" "}
-                    <code>/admin/criteria/[slug]</code>
-                  </div>
+                  <strong>Hinweis:</strong> „Teilnehmer“ ist ein Deep-Link auf{" "}
+                  <code>/admin/participants/[slug]</code>.
+                </div>
+                <div>
+                  „Kategorien“ ist aktuell nur ein Shortcut (bis wir eine echte Criteria-Admin-Seite bauen).
                 </div>
               </div>
             </div>
