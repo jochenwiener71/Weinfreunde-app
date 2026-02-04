@@ -10,7 +10,7 @@ type WineSlotPublic = {
   grape: string | null;
   vintage: string | null;
 
-  // ✅ optional: bottle photo (wenn im wine doc gespeichert)
+  // bottle photo
   imageUrl: string | null;
   imagePath: string | null;
 };
@@ -49,28 +49,23 @@ export async function GET(req: Request) {
       .collection("wines")
       .get();
 
-    const showDetails = true; // ✅ Reporting: Details immer anzeigen
-
+    // ✅ Reporting/Public: Details immer anzeigen (keine Conditionals mehr)
     const wines: WineSlotPublic[] = winesSnap.docs
       .map((w) => {
         const wd = w.data() as any;
-        const blindNumber = typeof wd.blindNumber === "number" ? wd.blindNumber : null;
-        const serveOrder = typeof wd.serveOrder === "number" ? wd.serveOrder : null;
 
         return {
           id: w.id,
-          blindNumber,
-          serveOrder,
+          blindNumber: typeof wd.blindNumber === "number" ? wd.blindNumber : null,
+          serveOrder: typeof wd.serveOrder === "number" ? wd.serveOrder : null,
 
-          // only if open/revealed
-          ownerName: showDetails && typeof wd.ownerName === "string" ? wd.ownerName : null,
-          winery: showDetails && typeof wd.winery === "string" ? wd.winery : null,
-          grape: showDetails && typeof wd.grape === "string" ? wd.grape : null,
-          vintage: showDetails && typeof wd.vintage === "string" ? wd.vintage : null,
+          ownerName: typeof wd.ownerName === "string" ? wd.ownerName : null,
+          winery: typeof wd.winery === "string" ? wd.winery : null,
+          grape: typeof wd.grape === "string" ? wd.grape : null,
+          vintage: typeof wd.vintage === "string" ? wd.vintage : null,
 
-          // bottle photo
-          imageUrl: showDetails && typeof wd.imageUrl === "string" ? wd.imageUrl : null,
-          imagePath: showDetails && typeof wd.imagePath === "string" ? wd.imagePath : null,
+          imageUrl: typeof wd.imageUrl === "string" ? wd.imageUrl : null,
+          imagePath: typeof wd.imagePath === "string" ? wd.imagePath : null,
         };
       })
       .sort((a, b) => (a.blindNumber ?? 999) - (b.blindNumber ?? 999));
