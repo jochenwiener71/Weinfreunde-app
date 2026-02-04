@@ -49,8 +49,7 @@ export async function GET(req: Request) {
       .collection("wines")
       .get();
 
-    // ✅ Details ab "open" ODER "revealed" anzeigen
-    const showDetails = status === "open" || status === "revealed";
+    const showDetails = true; // ✅ Reporting: Details immer anzeigen
 
     const wines: WineSlotPublic[] = winesSnap.docs
       .map((w) => {
