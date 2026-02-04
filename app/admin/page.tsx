@@ -35,20 +35,20 @@ export default function AdminPage() {
     return `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encode(joinUrl)}`;
   }, [joinUrl]);
 
-  // ✅ Deep links (Option A)
+  // ✅ Deep links (fixed to real routes)
   const manageTastingHref = useMemo(() => {
     if (!slug) return "";
-    return `/admin/tasting?publicSlug=${encode(slug)}`;
+    return `/admin/tasting/${encode(slug)}`;
   }, [slug]);
 
   const manageParticipantsHref = useMemo(() => {
     if (!slug) return "";
-    return `/admin/tasting?publicSlug=${encode(slug)}#participants`;
+    return `/admin/participants/${encode(slug)}`;
   }, [slug]);
 
   const manageCriteriaHref = useMemo(() => {
     if (!slug) return "";
-    return `/admin/tasting?publicSlug=${encode(slug)}#criteria`;
+    return `/admin/criteria/${encode(slug)}`;
   }, [slug]);
 
   async function copy(text: string) {
@@ -109,7 +109,7 @@ export default function AdminPage() {
           <input
             value={publicSlug}
             onChange={(e) => setPublicSlug(e.target.value)}
-            placeholder="weinfreunde"
+            placeholder="weinfreunde-feb26"
             style={{ width: "100%", padding: 10, marginTop: 6 }}
             autoCapitalize="none"
             autoCorrect="off"
@@ -179,14 +179,13 @@ export default function AdminPage() {
                 style={{ border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8 }}
               />
 
-              <div style={{ fontSize: 12, opacity: 0.7, maxWidth: 480 }}>
+              <div style={{ fontSize: 12, opacity: 0.7, maxWidth: 520 }}>
                 <div style={{ marginBottom: 6 }}>
-                  <strong>Hinweis:</strong> „Teilnehmer“ und „Kategorien“ sind Deep-Links auf deine{" "}
-                  <code>/admin/tasting</code>-Seite.
-                </div>
-                <div>
-                  Wenn deine Seite anders heißt (z.B. <code>/admin/manage</code>), sag mir kurz den Pfad,
-                  dann passe ich die Links 1:1 an.
+                  <strong>Hinweis:</strong> Die Admin-Links gehen jetzt auf echte Seiten:
+                  <div style={{ marginTop: 6, lineHeight: 1.5 }}>
+                    <code>/admin/tasting/[slug]</code> · <code>/admin/participants/[slug]</code> ·{" "}
+                    <code>/admin/criteria/[slug]</code>
+                  </div>
                 </div>
               </div>
             </div>
