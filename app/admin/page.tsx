@@ -1,7 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+
+const LS_SLUG = "wf_admin_publicSlug";
+const LS_SECRET = "wf_admin_secret";
 
 function encode(s: string) {
   return encodeURIComponent(s);
@@ -25,8 +28,35 @@ function btnStyle(disabled?: boolean): CSSProperties {
 
 export default function AdminPage() {
   const [publicSlug, setPublicSlug] = useState("");
+  const [adminSecret, setAdminSecret] = useState("");
+
+  // ✅ Restore persisted values when opening dashboard
+  useEffect(() => {
+    try {
+      const savedSlug = localStorage.getItem(LS_SLUG) || "";
+      const savedSecret = localStorage.getItem(LS_SECRET) || "";
+      if (savedSlug) setPublicSlug(savedSlug);
+      if (savedSecret) setAdminSecret(savedSecret);
+    } catch {
+      // ignore (private mode etc.)
+    }
+  }, []);
+
+  // ✅ Persist on change
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_SLUG, publicSlug);
+    } catch {}
+  }, [publicSlug]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_SECRET, adminSecret);
+    } catch {}
+  }, [adminSecret]);
 
   const slug = useMemo(() => publicSlug.trim(), [publicSlug]);
+  const secret = useMemo(() => adminSecret.trim(), [adminSecret]);
 
   const joinUrl = useMemo(() => {
     if (!slug) return "";
@@ -58,16 +88,15 @@ export default function AdminPage() {
 
   const publicReportingHref = useMemo(() => {
     if (!slug) return "";
-    // ✅ public reporting is /reporting/[slug] (NOT /reporting)
-    return `/reporting/${encode(slug)}`;
+    return `/reporting/${encode(slug)}`; // ✅ NOT /reporting
   }, [slug]);
 
-  async function copy(text: string) {
+  async function copy(text: string, okMsg: string) {
     try {
       await navigator.clipboard.writeText(text);
-      alert("Link kopiert ✅");
+      alert(okMsg);
     } catch {
-      prompt("Kopiere den Link:", text);
+      prompt("Kopieren:", text);
     }
   }
 
@@ -77,12 +106,22 @@ export default function AdminPage() {
     window.open(printUrl, "_blank");
   }
 
+  function clearStored() {
+    setPublicSlug("");
+    setAdminSecret("");
+    try {
+      localStorage.removeItem(LS_SLUG);
+      localStorage.removeItem(LS_SECRET);
+    } catch {}
+  }
+
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 960 }}>
       <h1 style={{ marginTop: 0 }}>Admin Dashboard</h1>
 
       <p style={{ marginTop: 6, opacity: 0.75 }}>
-        Schnellzugriff: Tastings, Teilnehmer, Kriterien, QR/Join, Reporting.
+        publicSlug &amp; ADMIN_SECRET werden lokal gespeichert, damit du beim Zurückkommen
+        nicht neu tippen musst.
       </p>
 
       {/* ✅ GLOBAL QUICK LINKS */}
@@ -111,7 +150,7 @@ export default function AdminPage() {
         </Link>
       </section>
 
-      {/* ✅ CONTEXT QUICK ACTIONS (for a specific slug) */}
+      {/* ✅ CONTEXT QUICK ACTIONS */}
       <section
         style={{
           marginTop: 18,
@@ -121,20 +160,34 @@ export default function AdminPage() {
         }}
       >
         <h2 style={{ marginTop: 0, fontSize: 16 }}>
-          Tasting-Kontext (publicSlug)
+          Tasting-Kontext (publicSlug + ADMIN_SECRET)
         </h2>
 
-        <label style={{ display: "block" }}>
-          publicSlug
-          <input
-            value={publicSlug}
-            onChange={(e) => setPublicSlug(e.target.value)}
-            placeholder="weinfreunde-feb26"
-            style={{ width: "100%", padding: 10, marginTop: 6 }}
-            autoCapitalize="none"
-            autoCorrect="off"
-          />
-        </label>
+        <div style={{ display: "grid", gap: 12 }}>
+          <label style={{ display: "block" }}>
+            publicSlug
+            <input
+              value={publicSlug}
+              onChange={(e) => setPublicSlug(e.target.value)}
+              placeholder="weinfreunde-feb26"
+              style={{ width: "100%", padding: 10, marginTop: 6 }}
+              autoCapitalize="none"
+              autoCorrect="off"
+            />
+          </label>
+
+          <label style={{ display: "block" }}>
+            ADMIN_SECRET
+            <input
+              value={adminSecret}
+              onChange={(e) => setAdminSecret(e.target.value)}
+              placeholder="(wird lokal gespeichert)"
+              style={{ width: "100%", padding: 10, marginTop: 6 }}
+              autoCapitalize="none"
+              autoCorrect="off"
+            />
+          </label>
+        </div>
 
         <div
           style={{
@@ -175,7 +228,7 @@ export default function AdminPage() {
           </a>
 
           <button
-            onClick={() => joinUrl && copy(joinUrl)}
+            onClick={() => joinUrl && copy(joinUrl, "Join-Link kopiert ✅")}
             disabled={!slug}
             style={{
               ...btnStyle(!slug),
@@ -183,6 +236,17 @@ export default function AdminPage() {
             }}
           >
             📋 Join-Link kopieren
+          </button>
+
+          <button
+            onClick={() => secret && copy(secret, "ADMIN_SECRET kopiert ✅")}
+            disabled={!secret}
+            style={{
+              ...btnStyle(!secret),
+              cursor: !secret ? "not-allowed" : "pointer",
+            }}
+          >
+            🔑 Secret kopieren
           </button>
 
           <button
@@ -194,6 +258,16 @@ export default function AdminPage() {
             }}
           >
             🖨️ QR Druckansicht
+          </button>
+
+          <button
+            onClick={clearStored}
+            style={{
+              ...btnStyle(false),
+              cursor: "pointer",
+            }}
+          >
+            🧹 Werte löschen
           </button>
         </div>
 
@@ -232,22 +306,11 @@ export default function AdminPage() {
               />
 
               <div style={{ fontSize: 12, opacity: 0.7, maxWidth: 520 }}>
-                <div style={{ marginBottom: 6 }}>
-                  <strong>Routing-Check:</strong>
-                  <div>
-                    Admin Participants: <code>/admin/participants/[slug]</code>
-                  </div>
-                  <div>
-                    Admin Criteria: <code>/admin/criteria/[slug]</code>
-                  </div>
-                  <div>
-                    Admin Tasting: <code>/admin/tasting/[slug]</code>
-                  </div>
-                  <div>
-                    Public Reporting: <code>/reporting/[slug]</code> (nicht{" "}
-                    <code>/reporting</code>)
-                  </div>
-                </div>
+                <strong>Routing-Check:</strong>
+                <div>Admin Participants: <code>/admin/participants/[slug]</code></div>
+                <div>Admin Criteria: <code>/admin/criteria/[slug]</code></div>
+                <div>Admin Tasting: <code>/admin/tasting/[slug]</code></div>
+                <div>Public Reporting: <code>/reporting/[slug]</code> (nicht <code>/reporting</code>)</div>
               </div>
             </div>
           </>
