@@ -1,6 +1,6 @@
 import CriteriaClient from "./CriteriaClient";
 
-export default async function Page({
+export default async function AdminCriteriaPage({
   params,
 }: {
   params: Promise<{ slug: string }>;
