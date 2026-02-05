@@ -1,23 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 
 function encode(s: string) {
   return encodeURIComponent(s);
 }
 
-function btnStyle(disabled?: boolean): React.CSSProperties {
+function btnStyle(disabled?: boolean): CSSProperties {
   return {
-    padding: "10px 14px",
-    border: "1px solid rgba(0,0,0,0.15)",
+    padding: "10px 12px",
+    border: "1px solid rgba(0,0,0,0.18)",
     borderRadius: 8,
     textDecoration: "none",
     color: "inherit",
-    background: disabled ? "rgba(0,0,0,0.04)" : "white",
+    background: disabled ? "rgba(0,0,0,0.04)" : "transparent",
     opacity: disabled ? 0.55 : 1,
     pointerEvents: disabled ? "none" : "auto",
-    display: "inline-block",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
   };
 }
 
@@ -26,11 +28,9 @@ export default function AdminPage() {
 
   const slug = useMemo(() => publicSlug.trim(), [publicSlug]);
 
-  // ===== JOIN / QR =====
-
   const joinUrl = useMemo(() => {
     if (!slug) return "";
-    return `/join?slug=${encode(slug)}`;
+    return `https://weinfreunde-app.vercel.app/join?slug=${encode(slug)}`;
   }, [slug]);
 
   const qrUrl = useMemo(() => {
@@ -40,15 +40,27 @@ export default function AdminPage() {
     )}`;
   }, [joinUrl]);
 
-  // ===== ADMIN ROUTES =====
-  // (nur existierende!)
+  // ✅ Existing routes in your repo
+  const manageParticipantsHref = useMemo(() => {
+    if (!slug) return "";
+    return `/admin/participants/${encode(slug)}`;
+  }, [slug]);
 
-  const tastingAdmin = slug ? `/admin/tasting/${encode(slug)}` : "";
-  const participantsAdmin = slug
-    ? `/admin/participants/${encode(slug)}`
-    : "";
-  const criteriaAdmin = slug ? `/admin/criteria/${encode(slug)}` : "";
-  const publicReporting = slug ? `/reporting/${encode(slug)}` : "";
+  const manageCriteriaHref = useMemo(() => {
+    if (!slug) return "";
+    return `/admin/criteria/${encode(slug)}`;
+  }, [slug]);
+
+  const manageTastingHref = useMemo(() => {
+    if (!slug) return "";
+    return `/admin/tasting/${encode(slug)}`;
+  }, [slug]);
+
+  const publicReportingHref = useMemo(() => {
+    if (!slug) return "";
+    // ✅ public reporting is /reporting/[slug] (NOT /reporting)
+    return `/reporting/${encode(slug)}`;
+  }, [slug]);
 
   async function copy(text: string) {
     try {
@@ -61,108 +73,184 @@ export default function AdminPage() {
 
   function openPrint() {
     if (!slug) return;
-    window.open(`/admin/print-qr?slug=${encode(slug)}`, "_blank");
+    const printUrl = `/admin/print-qr?slug=${encode(slug)}`;
+    window.open(printUrl, "_blank");
   }
 
   return (
-    <main style={{ padding: 24, maxWidth: 900, fontFamily: "system-ui" }}>
-      <h1>Admin Dashboard</h1>
+    <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 960 }}>
+      <h1 style={{ marginTop: 0 }}>Admin Dashboard</h1>
 
-      {/* ===== GLOBAL LINKS ===== */}
+      <p style={{ marginTop: 6, opacity: 0.75 }}>
+        Schnellzugriff: Tastings, Teilnehmer, Kriterien, QR/Join, Reporting.
+      </p>
 
-      <section style={{ marginTop: 20, display: "flex", gap: 10, flexWrap: "wrap" }}>
+      {/* ✅ GLOBAL QUICK LINKS */}
+      <section
+        style={{
+          marginTop: 16,
+          display: "flex",
+          gap: 10,
+          flexWrap: "wrap",
+        }}
+      >
         <Link href="/admin/tastings" style={btnStyle(false)}>
-          Tastings verwalten
+          🗂️ Tastings
         </Link>
 
         <Link href="/admin/create" style={btnStyle(false)}>
-          Neues Tasting erstellen
+          ➕ Tasting anlegen
         </Link>
 
         <Link href="/admin/wines" style={btnStyle(false)}>
-          Weine verwalten
+          🍷 Weine
         </Link>
 
         <Link href="/admin/reporting" style={btnStyle(false)}>
-          Reporting Übersicht
+          📊 Reporting (Admin)
         </Link>
       </section>
 
-      {/* ===== SLUG CONTEXT ===== */}
-
+      {/* ✅ CONTEXT QUICK ACTIONS (for a specific slug) */}
       <section
         style={{
-          marginTop: 24,
+          marginTop: 18,
           border: "1px solid rgba(0,0,0,0.12)",
           borderRadius: 12,
-          padding: 18,
+          padding: 16,
         }}
       >
-        <h3>Tasting Kontext (publicSlug)</h3>
+        <h2 style={{ marginTop: 0, fontSize: 16 }}>
+          Tasting-Kontext (publicSlug)
+        </h2>
 
-        <input
-          value={publicSlug}
-          onChange={(e) => setPublicSlug(e.target.value)}
-          placeholder="weinfreunde-feb26"
+        <label style={{ display: "block" }}>
+          publicSlug
+          <input
+            value={publicSlug}
+            onChange={(e) => setPublicSlug(e.target.value)}
+            placeholder="weinfreunde-feb26"
+            style={{ width: "100%", padding: 10, marginTop: 6 }}
+            autoCapitalize="none"
+            autoCorrect="off"
+          />
+        </label>
+
+        <div
           style={{
-            width: "100%",
-            padding: 10,
-            marginTop: 6,
+            marginTop: 12,
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
           }}
-        />
-
-        {/* ===== CONTEXT LINKS ===== */}
-
-        <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <Link href={tastingAdmin || "#"} style={btnStyle(!slug)}>
-            Tasting verwalten
+        >
+          <Link href={manageTastingHref || "#"} style={btnStyle(!slug)}>
+            ⚙️ Tasting verwalten
           </Link>
 
-          <Link href={participantsAdmin || "#"} style={btnStyle(!slug)}>
-            Teilnehmer verwalten
+          <Link href={manageParticipantsHref || "#"} style={btnStyle(!slug)}>
+            👥 Teilnehmer verwalten
           </Link>
 
-          <Link href={criteriaAdmin || "#"} style={btnStyle(!slug)}>
-            Kategorien verwalten
+          <Link href={manageCriteriaHref || "#"} style={btnStyle(!slug)}>
+            ✅ Kategorien/Kriterien
           </Link>
 
-          <Link href={publicReporting || "#"} style={btnStyle(!slug)}>
-            Public Reporting öffnen
-          </Link>
+          <a
+            href={joinUrl || "#"}
+            target="_blank"
+            rel="noreferrer"
+            style={btnStyle(!slug)}
+          >
+            🔗 Join öffnen
+          </a>
 
-          <Link href={joinUrl || "#"} style={btnStyle(!slug)}>
-            Join Seite öffnen
-          </Link>
+          <a
+            href={publicReportingHref || "#"}
+            target="_blank"
+            rel="noreferrer"
+            style={btnStyle(!slug)}
+          >
+            📊 Public Reporting öffnen
+          </a>
 
           <button
             onClick={() => joinUrl && copy(joinUrl)}
             disabled={!slug}
-            style={{ ...btnStyle(!slug), cursor: "pointer" }}
+            style={{
+              ...btnStyle(!slug),
+              cursor: !slug ? "not-allowed" : "pointer",
+            }}
           >
-            Join Link kopieren
+            📋 Join-Link kopieren
           </button>
 
           <button
             onClick={openPrint}
             disabled={!slug}
-            style={{ ...btnStyle(!slug), cursor: "pointer" }}
+            style={{
+              ...btnStyle(!slug),
+              cursor: !slug ? "not-allowed" : "pointer",
+            }}
           >
-            QR Druckansicht
+            🖨️ QR Druckansicht
           </button>
         </div>
 
-        {/* ===== QR ===== */}
+        {/* ✅ QR BOX */}
+        {!joinUrl ? (
+          <p style={{ margin: "12px 0 0 0", fontSize: 13, opacity: 0.7 }}>
+            Slug eingeben → Join-Link / QR / Admin-Links werden aktiv.
+          </p>
+        ) : (
+          <>
+            <div style={{ marginTop: 12, fontSize: 13, opacity: 0.8 }}>
+              Join-Link:
+              <div style={{ marginTop: 6, wordBreak: "break-all" }}>
+                <code>{joinUrl}</code>
+              </div>
+            </div>
 
-        {slug && (
-          <div style={{ marginTop: 18 }}>
-            <img
-              src={qrUrl}
-              alt="QR"
-              width={150}
-              height={150}
-              style={{ border: "1px solid #ddd", borderRadius: 8 }}
-            />
-          </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 12,
+                flexWrap: "wrap",
+                alignItems: "center",
+                marginTop: 12,
+              }}
+            >
+              <img
+                src={qrUrl}
+                alt="QR Code"
+                width={160}
+                height={160}
+                style={{
+                  border: "1px solid rgba(0,0,0,0.12)",
+                  borderRadius: 8,
+                }}
+              />
+
+              <div style={{ fontSize: 12, opacity: 0.7, maxWidth: 520 }}>
+                <div style={{ marginBottom: 6 }}>
+                  <strong>Routing-Check:</strong>
+                  <div>
+                    Admin Participants: <code>/admin/participants/[slug]</code>
+                  </div>
+                  <div>
+                    Admin Criteria: <code>/admin/criteria/[slug]</code>
+                  </div>
+                  <div>
+                    Admin Tasting: <code>/admin/tasting/[slug]</code>
+                  </div>
+                  <div>
+                    Public Reporting: <code>/reporting/[slug]</code> (nicht{" "}
+                    <code>/reporting</code>)
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
         )}
       </section>
     </main>
