@@ -1,62 +1,67 @@
 import { NextResponse } from "next/server";
-import { db } from "@/app/api/firebaseadmin"; // ggf. Pfad bei dir anpassen
+import { db } from "@/lib/firebaseAdmin";
 
-function assertAdmin(req: Request) {
-  const secret = req.headers.get("x-admin-secret") || "";
-  if (!process.env.ADMIN_SECRET) throw new Error("ADMIN_SECRET env missing");
-  if (secret !== process.env.ADMIN_SECRET) throw new Error("Unauthorized");
-}
+async function getTastingRefByPublicSlug(publicSlug: string) {
+  const snap = await db
+    .collection("tastings")
+    .where("publicSlug", "==", publicSlug)
+    .limit(1)
+    .get();
 
-async function tastingRefBySlug(publicSlug: string) {
-  const snap = await db.collection("tastings").where("publicSlug", "==", publicSlug).limit(1).get();
-  if (snap.empty) throw new Error(`Tasting not found for publicSlug=${publicSlug}`);
+  if (snap.empty) return null;
   return snap.docs[0].ref;
 }
 
+function assertAdmin(reqSecret: string | null) {
+  const expected = String(process.env.ADMIN_SECRET ?? "").trim();
+  if (!expected) throw new Error("Server misconfigured: ADMIN_SECRET is not set.");
+  if (!reqSecret || reqSecret.trim() !== expected) throw new Error("Unauthorized: invalid ADMIN_SECRET.");
+}
+
+type UpsertBody = {
+  publicSlug: string;
+  adminSecret: string;
+  criterion: {
+    id?: string;
+    name: string;          // z.B. "Nase"
+    weight?: number;       // z.B. 0.2
+    order?: number;        // z.B. 1..n
+    active?: boolean;      // true/false
+  };
+};
+
 export async function POST(req: Request) {
   try {
-    assertAdmin(req);
+    const body = (await req.json()) as UpsertBody;
 
-    const body = await req.json();
-    const publicSlug = (body?.publicSlug || "").trim();
-    const c = body?.criterion || {};
+    const publicSlug = String(body?.publicSlug ?? "").trim();
+    const adminSecret = body?.adminSecret ?? null;
+    const c = body?.criterion;
 
-    if (!publicSlug) throw new Error("publicSlug missing");
-    if (!String(c.title || "").trim()) throw new Error("criterion.title missing");
-
-    const tastingRef = await tastingRefBySlug(publicSlug);
-
-    const data = {
-      title: String(c.title).trim(),
-      weight: Number(c.weight ?? 0),
-      order: Number(c.order ?? 0),
-      isActive: !!c.isActive,
-      updatedAt: new Date(),
-    };
-
-    let ref;
-    if (c.id) {
-      ref = tastingRef.collection("criteria").doc(String(c.id));
-      await ref.set(data, { merge: true });
-    } else {
-      ref = await tastingRef.collection("criteria").add({
-        ...data,
-        createdAt: new Date(),
-      });
+    if (!publicSlug) return NextResponse.json({ ok: false, error: "Missing publicSlug" }, { status: 400 });
+    if (!c || !String(c.name ?? "").trim()) {
+      return NextResponse.json({ ok: false, error: "Missing criterion.name" }, { status: 400 });
     }
 
-    const saved = await ref.get();
+    assertAdmin(adminSecret);
 
-    return NextResponse.json({
-      criterion: {
-        id: saved.id,
-        title: saved.get("title") ?? "",
-        weight: saved.get("weight") ?? 0,
-        order: saved.get("order") ?? 0,
-        isActive: saved.get("isActive") ?? true,
-      },
-    });
+    const tastingRef = await getTastingRefByPublicSlug(publicSlug);
+    if (!tastingRef) return NextResponse.json({ ok: false, error: "Tasting not found" }, { status: 404 });
+
+    const id = (c.id ?? "").trim() || tastingRef.collection("criteria").doc().id;
+
+    const payload = {
+      name: String(c.name).trim(),
+      weight: typeof c.weight === "number" ? c.weight : 0,
+      order: typeof c.order === "number" ? c.order : 0,
+      active: typeof c.active === "boolean" ? c.active : true,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await tastingRef.collection("criteria").doc(id).set(payload, { merge: true });
+
+    return NextResponse.json({ ok: true, id, criterion: payload });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "error" }, { status: 400 });
+    return NextResponse.json({ ok: false, error: e?.message ?? "Unknown error" }, { status: 500 });
   }
 }
