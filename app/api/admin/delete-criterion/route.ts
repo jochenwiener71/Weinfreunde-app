@@ -1,34 +1,49 @@
 import { NextResponse } from "next/server";
-import { db } from "@/app/api/firebaseadmin"; // ggf. Pfad bei dir anpassen
+import { db } from "@/lib/firebaseAdmin";
 
-function assertAdmin(req: Request) {
-  const secret = req.headers.get("x-admin-secret") || "";
-  if (!process.env.ADMIN_SECRET) throw new Error("ADMIN_SECRET env missing");
-  if (secret !== process.env.ADMIN_SECRET) throw new Error("Unauthorized");
-}
+async function getTastingRefByPublicSlug(publicSlug: string) {
+  const snap = await db
+    .collection("tastings")
+    .where("publicSlug", "==", publicSlug)
+    .limit(1)
+    .get();
 
-async function tastingRefBySlug(publicSlug: string) {
-  const snap = await db.collection("tastings").where("publicSlug", "==", publicSlug).limit(1).get();
-  if (snap.empty) throw new Error(`Tasting not found for publicSlug=${publicSlug}`);
+  if (snap.empty) return null;
   return snap.docs[0].ref;
 }
 
+function assertAdmin(reqSecret: string | null) {
+  const expected = String(process.env.ADMIN_SECRET ?? "").trim();
+  if (!expected) throw new Error("Server misconfigured: ADMIN_SECRET is not set.");
+  if (!reqSecret || reqSecret.trim() !== expected) throw new Error("Unauthorized: invalid ADMIN_SECRET.");
+}
+
+type DeleteBody = {
+  publicSlug: string;
+  adminSecret: string;
+  criterionId: string;
+};
+
 export async function POST(req: Request) {
   try {
-    assertAdmin(req);
+    const body = (await req.json()) as DeleteBody;
 
-    const body = await req.json();
-    const publicSlug = (body?.publicSlug || "").trim();
-    const id = (body?.id || "").trim();
+    const publicSlug = String(body?.publicSlug ?? "").trim();
+    const adminSecret = body?.adminSecret ?? null;
+    const criterionId = String(body?.criterionId ?? "").trim();
 
-    if (!publicSlug) throw new Error("publicSlug missing");
-    if (!id) throw new Error("id missing");
+    if (!publicSlug) return NextResponse.json({ ok: false, error: "Missing publicSlug" }, { status: 400 });
+    if (!criterionId) return NextResponse.json({ ok: false, error: "Missing criterionId" }, { status: 400 });
 
-    const tastingRef = await tastingRefBySlug(publicSlug);
-    await tastingRef.collection("criteria").doc(id).delete();
+    assertAdmin(adminSecret);
+
+    const tastingRef = await getTastingRefByPublicSlug(publicSlug);
+    if (!tastingRef) return NextResponse.json({ ok: false, error: "Tasting not found" }, { status: 404 });
+
+    await tastingRef.collection("criteria").doc(criterionId).delete();
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "error" }, { status: 400 });
+    return NextResponse.json({ ok: false, error: e?.message ?? "Unknown error" }, { status: 500 });
   }
 }
