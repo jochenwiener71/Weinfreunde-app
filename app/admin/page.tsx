@@ -9,14 +9,15 @@ function encode(s: string) {
 
 function btnStyle(disabled?: boolean): React.CSSProperties {
   return {
-    padding: "10px 12px",
-    border: "1px solid rgba(0,0,0,0.18)",
+    padding: "10px 14px",
+    border: "1px solid rgba(0,0,0,0.15)",
     borderRadius: 8,
     textDecoration: "none",
     color: "inherit",
-    background: disabled ? "rgba(0,0,0,0.04)" : "transparent",
+    background: disabled ? "rgba(0,0,0,0.04)" : "white",
     opacity: disabled ? 0.55 : 1,
     pointerEvents: disabled ? "none" : "auto",
+    display: "inline-block",
   };
 }
 
@@ -25,34 +26,29 @@ export default function AdminPage() {
 
   const slug = useMemo(() => publicSlug.trim(), [publicSlug]);
 
+  // ===== JOIN / QR =====
+
   const joinUrl = useMemo(() => {
     if (!slug) return "";
-    return `https://weinfreunde-app.vercel.app/join?slug=${encode(slug)}`;
+    return `/join?slug=${encode(slug)}`;
   }, [slug]);
 
   const qrUrl = useMemo(() => {
     if (!joinUrl) return "";
-    return `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encode(joinUrl)}`;
+    return `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encode(
+      joinUrl
+    )}`;
   }, [joinUrl]);
 
-  // ✅ Deep links (fixed to existing routes)
-  const manageTastingHref = useMemo(() => {
-    if (!slug) return "";
-    // ✅ exists: app/admin/tasting/[slug]/page.tsx
-    return `/admin/tasting/${encode(slug)}`;
-  }, [slug]);
+  // ===== ADMIN ROUTES =====
+  // (nur existierende!)
 
-  const manageParticipantsHref = useMemo(() => {
-    if (!slug) return "";
-    // ✅ exists: app/admin/participants/[slug]/page.tsx
-    return `/admin/participants/${encode(slug)}`;
-  }, [slug]);
-
-  const manageCriteriaHref = useMemo(() => {
-    if (!slug) return "";
-    // ✅ exists: app/admin/criteria/[slug]/page.tsx
-    return `/admin/criteria/${encode(slug)}`;
-  }, [slug]);
+  const tastingAdmin = slug ? `/admin/tasting/${encode(slug)}` : "";
+  const participantsAdmin = slug
+    ? `/admin/participants/${encode(slug)}`
+    : "";
+  const criteriaAdmin = slug ? `/admin/criteria/${encode(slug)}` : "";
+  const publicReporting = slug ? `/reporting/${encode(slug)}` : "";
 
   async function copy(text: string) {
     try {
@@ -64,27 +60,23 @@ export default function AdminPage() {
   }
 
   function openPrint() {
-    if (!joinUrl) return;
-    const printUrl = `/admin/print-qr?slug=${encode(slug)}`;
-    window.open(printUrl, "_blank");
+    if (!slug) return;
+    window.open(`/admin/print-qr?slug=${encode(slug)}`, "_blank");
   }
 
   return (
-    <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 960 }}>
-      <h1 style={{ marginTop: 0 }}>Admin Dashboard</h1>
+    <main style={{ padding: 24, maxWidth: 900, fontFamily: "system-ui" }}>
+      <h1>Admin Dashboard</h1>
 
-      <p style={{ marginTop: 6, opacity: 0.75 }}>
-        Schnellzugriff: Tastings verwalten, QR-Code erzeugen, Weine pflegen.
-      </p>
+      {/* ===== GLOBAL LINKS ===== */}
 
-      {/* ✅ GLOBAL QUICK LINKS */}
-      <section style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
+      <section style={{ marginTop: 20, display: "flex", gap: 10, flexWrap: "wrap" }}>
         <Link href="/admin/tastings" style={btnStyle(false)}>
           Tastings verwalten
         </Link>
 
         <Link href="/admin/create" style={btnStyle(false)}>
-          Tasting anlegen
+          Neues Tasting erstellen
         </Link>
 
         <Link href="/admin/wines" style={btnStyle(false)}>
@@ -92,107 +84,85 @@ export default function AdminPage() {
         </Link>
 
         <Link href="/admin/reporting" style={btnStyle(false)}>
-          Reporting
+          Reporting Übersicht
         </Link>
       </section>
 
-      {/* ✅ CONTEXT QUICK ACTIONS (for a specific slug) */}
+      {/* ===== SLUG CONTEXT ===== */}
+
       <section
         style={{
-          marginTop: 18,
+          marginTop: 24,
           border: "1px solid rgba(0,0,0,0.12)",
           borderRadius: 12,
-          padding: 16,
+          padding: 18,
         }}
       >
-        <h2 style={{ marginTop: 0, fontSize: 16 }}>Tasting-Kontext (publicSlug)</h2>
+        <h3>Tasting Kontext (publicSlug)</h3>
 
-        <label style={{ display: "block" }}>
-          publicSlug
-          <input
-            value={publicSlug}
-            onChange={(e) => setPublicSlug(e.target.value)}
-            placeholder="weinfreunde"
-            style={{ width: "100%", padding: 10, marginTop: 6 }}
-            autoCapitalize="none"
-            autoCorrect="off"
-          />
-        </label>
+        <input
+          value={publicSlug}
+          onChange={(e) => setPublicSlug(e.target.value)}
+          placeholder="weinfreunde-feb26"
+          style={{
+            width: "100%",
+            padding: 10,
+            marginTop: 6,
+          }}
+        />
 
-        <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <Link href={manageTastingHref || "#"} style={btnStyle(!slug)}>
-            Tasting verwalten (dieser Slug)
+        {/* ===== CONTEXT LINKS ===== */}
+
+        <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <Link href={tastingAdmin || "#"} style={btnStyle(!slug)}>
+            Tasting verwalten
           </Link>
 
-          <Link href={manageParticipantsHref || "#"} style={btnStyle(!slug)}>
+          <Link href={participantsAdmin || "#"} style={btnStyle(!slug)}>
             Teilnehmer verwalten
           </Link>
 
-          <Link href={manageCriteriaHref || "#"} style={btnStyle(!slug)}>
+          <Link href={criteriaAdmin || "#"} style={btnStyle(!slug)}>
             Kategorien verwalten
           </Link>
 
-          <a href={joinUrl || "#"} target="_blank" rel="noreferrer" style={btnStyle(!slug)}>
-            Join öffnen
-          </a>
+          <Link href={publicReporting || "#"} style={btnStyle(!slug)}>
+            Public Reporting öffnen
+          </Link>
+
+          <Link href={joinUrl || "#"} style={btnStyle(!slug)}>
+            Join Seite öffnen
+          </Link>
 
           <button
             onClick={() => joinUrl && copy(joinUrl)}
             disabled={!slug}
-            style={{
-              ...btnStyle(!slug),
-              cursor: !slug ? "not-allowed" : "pointer",
-            }}
+            style={{ ...btnStyle(!slug), cursor: "pointer" }}
           >
-            Join-Link kopieren
+            Join Link kopieren
           </button>
 
           <button
             onClick={openPrint}
             disabled={!slug}
-            style={{
-              ...btnStyle(!slug),
-              cursor: !slug ? "not-allowed" : "pointer",
-            }}
+            style={{ ...btnStyle(!slug), cursor: "pointer" }}
           >
             QR Druckansicht
           </button>
         </div>
 
-        {/* ✅ QR BOX */}
-        {!joinUrl ? (
-          <p style={{ margin: "12px 0 0 0", fontSize: 13, opacity: 0.7 }}>
-            Slug eingeben → Join-Link / QR / Admin-Links werden aktiv.
-          </p>
-        ) : (
-          <>
-            <div style={{ marginTop: 12, fontSize: 13, opacity: 0.8 }}>
-              Join-Link:
-              <div style={{ marginTop: 6, wordBreak: "break-all" }}>
-                <code>{joinUrl}</code>
-              </div>
-            </div>
+        {/* ===== QR ===== */}
 
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
-              <img
-                src={qrUrl}
-                alt="QR Code"
-                width={160}
-                height={160}
-                style={{ border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8 }}
-              />
-
-              <div style={{ fontSize: 12, opacity: 0.7, maxWidth: 480 }}>
-                <div style={{ marginBottom: 6 }}>
-                  <strong>Hinweis:</strong> Diese Links gehen direkt auf deine bestehenden Seiten:
-                  <div style={{ marginTop: 6 }}>
-                    <code>/admin/tasting/[slug]</code>, <code>/admin/participants/[slug]</code>,{" "}
-                    <code>/admin/criteria/[slug]</code>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </>
+        {slug && (
+          <div style={{ marginTop: 18 }}>
+            <img
+              src={qrUrl}
+              alt="QR"
+              width={150}
+              height={150}
+              style={{ border: "1px solid #ddd", borderRadius: 8 }}
+            />
+          </div>
         )}
       </section>
     </main>
