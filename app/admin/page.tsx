@@ -1,16 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
-
-const LS_SLUG = "wf_admin_publicSlug";
-const LS_SECRET = "wf_admin_secret";
+import React, { useEffect, useMemo, useState } from "react";
 
 function encode(s: string) {
   return encodeURIComponent(s);
 }
 
-function btnStyle(disabled?: boolean): CSSProperties {
+function btnStyle(disabled?: boolean): React.CSSProperties {
   return {
     padding: "10px 12px",
     border: "1px solid rgba(0,0,0,0.18)",
@@ -20,43 +17,46 @@ function btnStyle(disabled?: boolean): CSSProperties {
     background: disabled ? "rgba(0,0,0,0.04)" : "transparent",
     opacity: disabled ? 0.55 : 1,
     pointerEvents: disabled ? "none" : "auto",
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 8,
   };
 }
+
+const SS_SLUG = "wf_admin_publicSlug";
+const SS_SECRET = "wf_admin_secret";
 
 export default function AdminPage() {
   const [publicSlug, setPublicSlug] = useState("");
   const [adminSecret, setAdminSecret] = useState("");
 
-  // ✅ Restore persisted values when opening dashboard
+  // ✅ Restore from sessionStorage (so Back-to-Dashboard keeps values)
   useEffect(() => {
     try {
-      const savedSlug = localStorage.getItem(LS_SLUG) || "";
-      const savedSecret = localStorage.getItem(LS_SECRET) || "";
+      const savedSlug = sessionStorage.getItem(SS_SLUG) ?? "";
+      const savedSecret = sessionStorage.getItem(SS_SECRET) ?? "";
       if (savedSlug) setPublicSlug(savedSlug);
       if (savedSecret) setAdminSecret(savedSecret);
     } catch {
-      // ignore (private mode etc.)
+      // ignore
     }
   }, []);
 
-  // ✅ Persist on change
+  // ✅ Persist to sessionStorage
   useEffect(() => {
     try {
-      localStorage.setItem(LS_SLUG, publicSlug);
-    } catch {}
+      sessionStorage.setItem(SS_SLUG, publicSlug.trim());
+    } catch {
+      // ignore
+    }
   }, [publicSlug]);
 
   useEffect(() => {
     try {
-      localStorage.setItem(LS_SECRET, adminSecret);
-    } catch {}
+      sessionStorage.setItem(SS_SECRET, adminSecret);
+    } catch {
+      // ignore
+    }
   }, [adminSecret]);
 
   const slug = useMemo(() => publicSlug.trim(), [publicSlug]);
-  const secret = useMemo(() => adminSecret.trim(), [adminSecret]);
 
   const joinUrl = useMemo(() => {
     if (!slug) return "";
@@ -65,38 +65,42 @@ export default function AdminPage() {
 
   const qrUrl = useMemo(() => {
     if (!joinUrl) return "";
-    return `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encode(
-      joinUrl
-    )}`;
+    return `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encode(joinUrl)}`;
   }, [joinUrl]);
 
-  // ✅ Existing routes in your repo
+  // ✅ Correct deep links to routes that exist in your repo
+  const manageTastingHref = useMemo(() => {
+    if (!slug) return "";
+    return `/admin/tasting/${encode(slug)}`; // exists: app/admin/tasting/[slug]/page.tsx
+  }, [slug]);
+
   const manageParticipantsHref = useMemo(() => {
     if (!slug) return "";
-    return `/admin/participants/${encode(slug)}`;
+    return `/admin/participants/${encode(slug)}`; // exists
   }, [slug]);
 
   const manageCriteriaHref = useMemo(() => {
     if (!slug) return "";
-    return `/admin/criteria/${encode(slug)}`;
+    return `/admin/criteria/${encode(slug)}`; // exists
   }, [slug]);
 
-  const manageTastingHref = useMemo(() => {
-    if (!slug) return "";
-    return `/admin/tasting/${encode(slug)}`;
-  }, [slug]);
+  const manageWinesHref = useMemo(() => {
+    // your /admin/wines is global and already works
+    return `/admin/wines`;
+  }, []);
 
+  // ✅ reporting public is /reporting/[slug] (NOT /reporting)
   const publicReportingHref = useMemo(() => {
     if (!slug) return "";
-    return `/reporting/${encode(slug)}`; // ✅ NOT /reporting
+    return `/reporting/${encode(slug)}`;
   }, [slug]);
 
-  async function copy(text: string, okMsg: string) {
+  async function copy(text: string) {
     try {
       await navigator.clipboard.writeText(text);
-      alert(okMsg);
+      alert("Link kopiert ✅");
     } catch {
-      prompt("Kopieren:", text);
+      prompt("Kopiere den Link:", text);
     }
   }
 
@@ -106,13 +110,13 @@ export default function AdminPage() {
     window.open(printUrl, "_blank");
   }
 
-  function clearStored() {
+  function clearSession() {
+    try {
+      sessionStorage.removeItem(SS_SLUG);
+      sessionStorage.removeItem(SS_SECRET);
+    } catch {}
     setPublicSlug("");
     setAdminSecret("");
-    try {
-      localStorage.removeItem(LS_SLUG);
-      localStorage.removeItem(LS_SECRET);
-    } catch {}
   }
 
   return (
@@ -120,37 +124,29 @@ export default function AdminPage() {
       <h1 style={{ marginTop: 0 }}>Admin Dashboard</h1>
 
       <p style={{ marginTop: 6, opacity: 0.75 }}>
-        publicSlug &amp; ADMIN_SECRET werden lokal gespeichert, damit du beim Zurückkommen
-        nicht neu tippen musst.
+        Schnellzugriff: Tastings verwalten, QR-Code erzeugen, Weine/Teilnehmer/Kriterien pflegen.
       </p>
 
       {/* ✅ GLOBAL QUICK LINKS */}
-      <section
-        style={{
-          marginTop: 16,
-          display: "flex",
-          gap: 10,
-          flexWrap: "wrap",
-        }}
-      >
+      <section style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
         <Link href="/admin/tastings" style={btnStyle(false)}>
-          🗂️ Tastings
+          Tastings verwalten
         </Link>
 
         <Link href="/admin/create" style={btnStyle(false)}>
-          ➕ Tasting anlegen
+          Tasting anlegen
         </Link>
 
         <Link href="/admin/wines" style={btnStyle(false)}>
-          🍷 Weine
+          Weine verwalten
         </Link>
 
         <Link href="/admin/reporting" style={btnStyle(false)}>
-          📊 Reporting (Admin)
+          Admin Reporting
         </Link>
       </section>
 
-      {/* ✅ CONTEXT QUICK ACTIONS */}
+      {/* ✅ CONTEXT BOX */}
       <section
         style={{
           marginTop: 18,
@@ -159,11 +155,9 @@ export default function AdminPage() {
           padding: 16,
         }}
       >
-        <h2 style={{ marginTop: 0, fontSize: 16 }}>
-          Tasting-Kontext (publicSlug + ADMIN_SECRET)
-        </h2>
+        <h2 style={{ marginTop: 0, fontSize: 16 }}>Tasting-Kontext</h2>
 
-        <div style={{ display: "grid", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <label style={{ display: "block" }}>
             publicSlug
             <input
@@ -181,7 +175,7 @@ export default function AdminPage() {
             <input
               value={adminSecret}
               onChange={(e) => setAdminSecret(e.target.value)}
-              placeholder="(wird lokal gespeichert)"
+              placeholder="mysecret"
               style={{ width: "100%", padding: 10, marginTop: 6 }}
               autoCapitalize="none"
               autoCorrect="off"
@@ -189,92 +183,59 @@ export default function AdminPage() {
           </label>
         </div>
 
-        <div
-          style={{
-            marginTop: 12,
-            display: "flex",
-            gap: 10,
-            flexWrap: "wrap",
-          }}
-        >
+        <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
           <Link href={manageTastingHref || "#"} style={btnStyle(!slug)}>
-            ⚙️ Tasting verwalten
+            Tasting verwalten (dieser Slug)
+          </Link>
+
+          <Link href={manageWinesHref} style={btnStyle(false)}>
+            Weine verwalten
           </Link>
 
           <Link href={manageParticipantsHref || "#"} style={btnStyle(!slug)}>
-            👥 Teilnehmer verwalten
+            Teilnehmer verwalten
           </Link>
 
           <Link href={manageCriteriaHref || "#"} style={btnStyle(!slug)}>
-            ✅ Kategorien/Kriterien
+            Kategorien/Kriterien verwalten
           </Link>
 
-          <a
-            href={joinUrl || "#"}
-            target="_blank"
-            rel="noreferrer"
-            style={btnStyle(!slug)}
-          >
-            🔗 Join öffnen
-          </a>
+          <Link href={publicReportingHref || "#"} style={btnStyle(!slug)}>
+            Public Reporting öffnen
+          </Link>
 
-          <a
-            href={publicReportingHref || "#"}
-            target="_blank"
-            rel="noreferrer"
-            style={btnStyle(!slug)}
-          >
-            📊 Public Reporting öffnen
+          <a href={joinUrl || "#"} target="_blank" rel="noreferrer" style={btnStyle(!slug)}>
+            Join öffnen
           </a>
 
           <button
-            onClick={() => joinUrl && copy(joinUrl, "Join-Link kopiert ✅")}
+            onClick={() => joinUrl && copy(joinUrl)}
             disabled={!slug}
-            style={{
-              ...btnStyle(!slug),
-              cursor: !slug ? "not-allowed" : "pointer",
-            }}
+            style={{ ...btnStyle(!slug), cursor: !slug ? "not-allowed" : "pointer" }}
           >
-            📋 Join-Link kopieren
-          </button>
-
-          <button
-            onClick={() => secret && copy(secret, "ADMIN_SECRET kopiert ✅")}
-            disabled={!secret}
-            style={{
-              ...btnStyle(!secret),
-              cursor: !secret ? "not-allowed" : "pointer",
-            }}
-          >
-            🔑 Secret kopieren
+            Join-Link kopieren
           </button>
 
           <button
             onClick={openPrint}
             disabled={!slug}
-            style={{
-              ...btnStyle(!slug),
-              cursor: !slug ? "not-allowed" : "pointer",
-            }}
+            style={{ ...btnStyle(!slug), cursor: !slug ? "not-allowed" : "pointer" }}
           >
-            🖨️ QR Druckansicht
+            QR Druckansicht
           </button>
 
           <button
-            onClick={clearStored}
-            style={{
-              ...btnStyle(false),
-              cursor: "pointer",
-            }}
+            onClick={clearSession}
+            style={{ ...btnStyle(false), cursor: "pointer" }}
+            title="Slug+Secret aus dem Tab löschen"
           >
-            🧹 Werte löschen
+            Session leeren
           </button>
         </div>
 
-        {/* ✅ QR BOX */}
         {!joinUrl ? (
           <p style={{ margin: "12px 0 0 0", fontSize: 13, opacity: 0.7 }}>
-            Slug eingeben → Join-Link / QR / Admin-Links werden aktiv.
+            publicSlug eingeben → Join-Link / QR / Admin-Links werden aktiv.
           </p>
         ) : (
           <>
@@ -285,32 +246,23 @@ export default function AdminPage() {
               </div>
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                gap: 12,
-                flexWrap: "wrap",
-                alignItems: "center",
-                marginTop: 12,
-              }}
-            >
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
               <img
                 src={qrUrl}
                 alt="QR Code"
                 width={160}
                 height={160}
-                style={{
-                  border: "1px solid rgba(0,0,0,0.12)",
-                  borderRadius: 8,
-                }}
+                style={{ border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8 }}
               />
 
-              <div style={{ fontSize: 12, opacity: 0.7, maxWidth: 520 }}>
-                <strong>Routing-Check:</strong>
-                <div>Admin Participants: <code>/admin/participants/[slug]</code></div>
-                <div>Admin Criteria: <code>/admin/criteria/[slug]</code></div>
-                <div>Admin Tasting: <code>/admin/tasting/[slug]</code></div>
-                <div>Public Reporting: <code>/reporting/[slug]</code> (nicht <code>/reporting</code>)</div>
+              <div style={{ fontSize: 12, opacity: 0.7, maxWidth: 480 }}>
+                <div style={{ marginBottom: 6 }}>
+                  <strong>Hinweis:</strong> Public Reporting ist <code>/reporting/[slug]</code> – daher war{" "}
+                  <code>/reporting</code> bei dir 404.
+                </div>
+                <div>
+                  Secret+Slug werden im Tab gespeichert (sessionStorage) → „← Admin Dashboard“ fragt nicht neu.
+                </div>
               </div>
             </div>
           </>
