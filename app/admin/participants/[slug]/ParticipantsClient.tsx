@@ -60,7 +60,8 @@ export default function ParticipantsClient({ slug }: { slug: string }) {
   }
 
   async function deleteParticipant(p: Participant) {
-    if (!confirm(`Teilnehmer wirklich löschen?\n\n${p.name ?? p.id}`)) return;
+    const displayName = p.name && p.name.trim() !== "" ? p.name : "(kein Name)";
+    if (!confirm(`Teilnehmer wirklich löschen?\n\n${displayName}\nID: ${p.id}`)) return;
 
     setMsg(null);
     setDeletingId(p.id);
@@ -144,34 +145,43 @@ export default function ParticipantsClient({ slug }: { slug: string }) {
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
             <thead>
               <tr style={{ background: "rgba(0,0,0,0.04)" }}>
-                <th style={{ textAlign: "left", padding: 10, width: 260 }}>Name</th>
-                <th style={{ textAlign: "left", padding: 10 }}>ID</th>
+                <th style={{ textAlign: "left", padding: 10 }}>Name</th>
                 <th style={{ textAlign: "right", padding: 10, width: 140 }}>Aktion</th>
               </tr>
             </thead>
             <tbody>
-              {participants.map((p) => (
-                <tr key={p.id} style={{ borderTop: "1px solid rgba(0,0,0,0.08)" }}>
-                  <td style={{ padding: 10 }}>
-                    <b>{p.name ?? "—"}</b>
-                    {!p.isActive ? <span style={{ marginLeft: 8, fontSize: 12, opacity: 0.7 }}>(inaktiv)</span> : null}
-                  </td>
-                  <td style={{ padding: 10, fontFamily: "ui-monospace", fontSize: 12, opacity: 0.85 }}>{p.id}</td>
-                  <td style={{ padding: 10, textAlign: "right" }}>
-                    <button
-                      onClick={() => deleteParticipant(p)}
-                      disabled={!adminSecret.trim() || deletingId === p.id}
-                      style={btnStyle(!adminSecret.trim() || deletingId === p.id)}
-                    >
-                      {deletingId === p.id ? "..." : "Löschen"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {participants.map((p) => {
+                const displayName = p.name && p.name.trim() !== "" ? p.name : "(kein Name)";
+                return (
+                  <tr key={p.id} style={{ borderTop: "1px solid rgba(0,0,0,0.08)" }}>
+                    <td style={{ padding: 10 }}>
+                      <div style={{ fontWeight: 600 }}>{displayName}</div>
+
+                      <div style={{ marginTop: 2, fontFamily: "ui-monospace", fontSize: 12, opacity: 0.75 }}>
+                        ID: {p.id}
+                      </div>
+
+                      {!p.isActive ? (
+                        <div style={{ marginTop: 2, fontSize: 12, opacity: 0.7 }}>(inaktiv)</div>
+                      ) : null}
+                    </td>
+
+                    <td style={{ padding: 10, textAlign: "right" }}>
+                      <button
+                        onClick={() => deleteParticipant(p)}
+                        disabled={!adminSecret.trim() || deletingId === p.id}
+                        style={btnStyle(!adminSecret.trim() || deletingId === p.id)}
+                      >
+                        {deletingId === p.id ? "..." : "Löschen"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
 
               {participants.length === 0 && (
                 <tr>
-                  <td colSpan={3} style={{ padding: 12, opacity: 0.7 }}>
+                  <td colSpan={2} style={{ padding: 12, opacity: 0.7 }}>
                     Noch keine Daten geladen.
                   </td>
                 </tr>
