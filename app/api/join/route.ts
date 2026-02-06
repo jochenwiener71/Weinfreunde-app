@@ -1,4 +1,3 @@
-// app/api/join/route.ts
 import { NextResponse } from "next/server";
 import admin from "firebase-admin";
 import { db } from "@/lib/firebaseAdmin";
@@ -7,10 +6,13 @@ import { createSession } from "@/lib/session";
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
+
     const slug = String(body.slug ?? "").trim();
     const pin = String(body.pin ?? "").trim();
-    const alias = String(body.alias ?? "").trim();
+    const aliasRaw = String(body.alias ?? "").trim();
+
+    const alias = aliasRaw ? aliasRaw.slice(0, 40) : "";
 
     if (!slug || !/^\d{4}$/.test(pin)) {
       return NextResponse.json({ error: "Invalid input" }, { status: 400 });
@@ -29,7 +31,7 @@ export async function POST(req: Request) {
     const tastingDoc = q.docs[0];
     const tasting = tastingDoc.data() as any;
 
-    if (tasting.status !== "open") {
+    if (String(tasting.status ?? "") !== "open") {
       return NextResponse.json({ error: "Tasting not open" }, { status: 403 });
     }
 
@@ -37,26 +39,44 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid PIN" }, { status: 401 });
     }
 
+    const maxParticipants = Number(tasting.maxParticipants ?? 10);
+
+    // ✅ Atomar: verhindert Race-Conditions (gleichzeitige Joins)
     const participantsRef = tastingDoc.ref.collection("participants");
 
-    // ✅ FIX: nur aktive Teilnehmer zählen (verhindert "Tasting full" durch alte/inaktive Einträge)
-    const activeSnap = await participantsRef.where("isActive", "==", true).get();
-    const max = Number.isFinite(Number(tasting.maxParticipants)) ? Number(tasting.maxParticipants) : 10;
+    const result = await db().runTransaction(async (tx) => {
+      const snap = await tx.get(participantsRef);
+      if (snap.size >= maxParticipants) {
+        return { ok: false as const, error: "Tasting full", status: 409 };
+      }
 
-    if (activeSnap.size >= max) {
-      return NextResponse.json({ error: "Tasting full" }, { status: 409 });
-    }
+      const pRef = participantsRef.doc();
+      const now = admin.firestore.FieldValue.serverTimestamp();
 
-    const pRef = participantsRef.doc();
-    await pRef.set({
-      alias: alias || `Teilnehmer ${activeSnap.size + 1}`,
-      isActive: true,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      tx.set(
+        pRef,
+        {
+          // ✅ Standardisieren: Name-Feld, damit Admin-UI immer was anzeigen kann
+          name: alias || `Teilnehmer ${snap.size + 1}`,
+          alias: alias || `Teilnehmer ${snap.size + 1}`,
+          isActive: true,
+          createdAt: now,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+
+      return { ok: true as const, participantId: pRef.id };
     });
 
-    await createSession({ tastingId: tastingDoc.id, participantId: pRef.id });
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    }
 
-    return NextResponse.json({ ok: true });
+    // ✅ Session cookie setzen
+    await createSession({ tastingId: tastingDoc.id, participantId: result.participantId });
+
+    return NextResponse.json({ ok: true, participantId: result.participantId });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? "Join failed" }, { status: 500 });
   }
