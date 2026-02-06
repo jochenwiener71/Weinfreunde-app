@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 type SummaryRow = {
   blindNumber: number;
-  perCrit: Record<string, number | null>;
+  perCrit: Record<string, number | null>; // ✅ keys = criterionId
   overall: number | null;
 };
 
@@ -93,10 +93,8 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
-  const revealed = useMemo(() => {
-    const st = String(summary?.status ?? wines?.status ?? "").toLowerCase();
-    return st === "revealed";
-  }, [summary?.status, wines?.status]);
+  // ✅ Vereinfachung: Reporting immer sichtbar
+  const revealed = true;
 
   const wineByBlind = useMemo(() => {
     const map = new Map<number, WineSlotPublic>();
@@ -113,12 +111,23 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
 
   const allRanking = useMemo(() => {
     const rows = summary?.ranking ?? [];
-    // falls ranking leer ist, nutze rows
     const base = rows.length ? rows : (summary?.rows ?? []);
     return base
       .filter((x) => x && typeof x.blindNumber === "number")
       .slice()
-      .sort((a, b) => (b.overall ?? -999) - (a.overall ?? -999));
+      // ✅ null overall immer ans Ende
+      .sort((a, b) => {
+        const ao = a.overall;
+        const bo = b.overall;
+        if (ao == null && bo == null) return a.blindNumber - b.blindNumber;
+        if (ao == null) return 1;
+        if (bo == null) return -1;
+        return bo - ao;
+      });
+  }, [summary]);
+
+  const orderedCriteria = useMemo(() => {
+    return (summary?.criteria ?? []).slice().sort((a, b) => a.order - b.order);
   }, [summary]);
 
   return (
@@ -173,16 +182,8 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
                 <div style={{ opacity: 0.9 }}>
                   Status: <b>{String(summary.status ?? "-")}</b> · Ratings: <b>{summary.ratingCount}</b>
                 </div>
-                <div style={{ opacity: 0.75, fontSize: 12 }}>
-                  Auto-Refresh: alle 10 Sekunden
-                </div>
+                <div style={{ opacity: 0.75, fontSize: 12 }}>Auto-Refresh: alle 10 Sekunden</div>
               </div>
-
-              {!revealed && (
-                <p style={{ marginTop: 10, opacity: 0.85 }}>
-                  Details (Weingut/Owner/Bild) werden erst nach <b>revealed</b> angezeigt.
-                </p>
-              )}
             </section>
 
             {/* TOP 3 */}
@@ -209,27 +210,21 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
                               </span>
                             </div>
 
-                            {revealed ? (
-                              <div style={{ marginTop: 6, opacity: 0.92, lineHeight: 1.35 }}>
-                                <div>
-                                  <b>{w?.winery ?? "—"}</b>
-                                  {w?.grape ? ` · ${w.grape}` : ""}
-                                  {w?.vintage ? ` · ${w.vintage}` : ""}
-                                </div>
-                                <div style={{ opacity: 0.85 }}>
-                                  Mitgebracht von: <b>{w?.ownerName ?? "—"}</b>
-                                </div>
+                            <div style={{ marginTop: 6, opacity: 0.92, lineHeight: 1.35 }}>
+                              <div>
+                                <b>{w?.winery ?? "—"}</b>
+                                {w?.grape ? ` · ${w.grape}` : ""}
+                                {w?.vintage ? ` · ${w.vintage}` : ""}
                               </div>
-                            ) : (
-                              <div style={{ marginTop: 6, opacity: 0.8 }}>
-                                (Details folgen nach Reveal)
+                              <div style={{ opacity: 0.85 }}>
+                                Mitgebracht von: <b>{w?.ownerName ?? "—"}</b>
                               </div>
-                            )}
+                            </div>
                           </div>
                         </div>
 
                         {/* photo */}
-                        {revealed && w?.imageUrl ? (
+                        {w?.imageUrl ? (
                           <img
                             src={w.imageUrl}
                             alt="Flasche"
@@ -271,22 +266,19 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
               <h2 style={h2Style}>📊 Ranking</h2>
 
               <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 680 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 740 }}>
                   <thead>
                     <tr>
                       <th style={thStyle}>#</th>
                       <th style={thStyle}>Wein</th>
                       <th style={thStyle}>Overall</th>
-                      {summary.criteria
-                        .slice()
-                        .sort((a, b) => a.order - b.order)
-                        .map((c) => (
-                          <th key={c.id} style={thStyle}>
-                            {c.label}
-                          </th>
-                        ))}
-                      {revealed && <th style={thStyle}>Owner</th>}
-                      {revealed && <th style={thStyle}>Weingut</th>}
+                      {orderedCriteria.map((c) => (
+                        <th key={c.id} style={thStyle}>
+                          {c.label}
+                        </th>
+                      ))}
+                      <th style={thStyle}>Owner</th>
+                      <th style={thStyle}>Weingut</th>
                     </tr>
                   </thead>
 
@@ -303,25 +295,21 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
                             {typeof r.overall === "number" ? r.overall.toFixed(2) : "—"}
                           </td>
 
-                          {summary.criteria
-                            .slice()
-                            .sort((a, b) => a.order - b.order)
-                            .map((c) => {
-                              const v = r.perCrit?.[c.label];
-                              return (
-                                <td key={c.id} style={tdStyle}>
-                                  {typeof v === "number" ? v.toFixed(2) : "—"}
-                                </td>
-                              );
-                            })}
+                          {orderedCriteria.map((c) => {
+                            // ✅ FIX: perCrit keys = criterionId (nicht label)
+                            const v = r.perCrit?.[c.id];
+                            return (
+                              <td key={c.id} style={tdStyle}>
+                                {typeof v === "number" ? v.toFixed(2) : "—"}
+                              </td>
+                            );
+                          })}
 
-                          {revealed && <td style={tdStyle}>{w?.ownerName ?? "—"}</td>}
-                          {revealed && (
-                            <td style={tdStyle}>
-                              {w?.winery ?? "—"}
-                              {w?.vintage ? ` · ${w.vintage}` : ""}
-                            </td>
-                          )}
+                          <td style={tdStyle}>{w?.ownerName ?? "—"}</td>
+                          <td style={tdStyle}>
+                            {w?.winery ?? "—"}
+                            {w?.vintage ? ` · ${w.vintage}` : ""}
+                          </td>
                         </tr>
                       );
                     })}
