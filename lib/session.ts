@@ -3,13 +3,13 @@ import { cookies } from "next/headers";
 
 const SESSION_COOKIE = "wf_session";
 
-type SessionData = {
+export type SessionData = {
   tastingId: string;
   participantId: string;
 };
 
 /**
- * Wird beim Join aufgerufen
+ * Session anlegen (Join)
  */
 export async function createSession(data: SessionData) {
   const value = Buffer.from(JSON.stringify(data)).toString("base64");
@@ -19,12 +19,12 @@ export async function createSession(data: SessionData) {
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 60 * 60 * 12, // 12h
+    maxAge: 60 * 60 * 12, // 12 Stunden
   });
 }
 
 /**
- * ✅ NEU: Session lesen (für Rating, Navigation, etc.)
+ * Session lesen (optional)
  */
 export async function getSession(): Promise<SessionData | null> {
   const c = cookies().get(SESSION_COOKIE);
@@ -39,7 +39,18 @@ export async function getSession(): Promise<SessionData | null> {
 }
 
 /**
- * Optional, aber sauber
+ * ✅ Session erzwingen (für rating/save, rating/get, etc.)
+ */
+export async function requireSession(): Promise<SessionData> {
+  const session = await getSession();
+  if (!session) {
+    throw new Error("Not logged in");
+  }
+  return session;
+}
+
+/**
+ * Optional: Logout / Cleanup
  */
 export async function clearSession() {
   cookies().delete(SESSION_COOKIE);
