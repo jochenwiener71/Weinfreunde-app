@@ -1,3 +1,4 @@
+// app/api/admin/list-participants/route.ts
 import { NextResponse } from "next/server";
 import admin from "firebase-admin";
 import { db } from "@/lib/firebaseAdmin";
@@ -8,7 +9,13 @@ import { requireAdminSecret } from "@/lib/security";
  */
 function pickName(p: any): string | null {
   const candidates = [
+    // ✅ dein altes Join-Feld
+    p?.alias,
+
+    // ✅ dein neues Join-Feld (nach Fix)
     p?.name,
+
+    // weitere Varianten (nur Fallbacks)
     p?.firstName,
     p?.displayName,
     p?.participantName,
