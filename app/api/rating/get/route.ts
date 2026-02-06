@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 
 export async function GET(req: Request) {
   try {
+    // 🔐 Session prüfen (Teilnehmer muss eingeloggt sein)
     const session = requireSession();
 
     const { searchParams } = new URL(req.url);
@@ -11,9 +12,13 @@ export async function GET(req: Request) {
     const blindNumber = Number(searchParams.get("blindNumber"));
 
     if (!slug || !Number.isFinite(blindNumber) || blindNumber < 1) {
-      return NextResponse.json({ ok: false, error: "Invalid input" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Invalid input" },
+        { status: 400 }
+      );
     }
 
+    // 🍷 Tasting per publicSlug finden
     const q = await db()
       .collection("tastings")
       .where("publicSlug", "==", slug)
@@ -21,28 +26,37 @@ export async function GET(req: Request) {
       .get();
 
     if (q.empty) {
-      return NextResponse.json({ ok: false, error: "Tasting not found" }, { status: 404 });
+      return NextResponse.json({
+        ok: true,
+        exists: false,
+      });
     }
 
     const tastingDoc = q.docs[0];
 
-    // ✅ Muss zu deiner Save-Route passen:
-    // ratingId = `${participantId}_wine_${blindNumber}`
+    // 📄 Rating-ID (konsistent zu /api/rating/save)
     const ratingId = `${session.participantId}_wine_${blindNumber}`;
-    const doc = await tastingDoc.ref.collection("ratings").doc(ratingId).get();
 
-    if (!doc.exists) {
-      return NextResponse.json({ ok: true, exists: false, rating: null });
+    const snap = await tastingDoc.ref
+      .collection("ratings")
+      .doc(ratingId)
+      .get();
+
+    if (!snap.exists) {
+      return NextResponse.json({
+        ok: true,
+        exists: false,
+      });
     }
 
     return NextResponse.json({
       ok: true,
       exists: true,
-      rating: doc.data() ?? null,
+      rating: snap.data(),
     });
   } catch (e: any) {
     return NextResponse.json(
-      { ok: false, error: e?.message ?? "Load failed" },
+      { error: e?.message ?? "Failed to load rating" },
       { status: 500 }
     );
   }
