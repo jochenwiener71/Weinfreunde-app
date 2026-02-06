@@ -21,6 +21,16 @@ type PublicData = {
   } | null;
 };
 
+type Draft = {
+  scores: Record<string, number>;
+  comment: string;
+  updatedAt: number;
+};
+
+function draftKey(slug: string, blindNumber: number) {
+  return `wf_draft_${slug}__${blindNumber}`;
+}
+
 export default function WineRatePage({
   params,
 }: {
@@ -35,6 +45,7 @@ export default function WineRatePage({
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // 1) Public Daten (Tasting + Criteria + Wine) laden
   useEffect(() => {
     (async () => {
       setMsg(null);
@@ -47,6 +58,8 @@ export default function WineRatePage({
         const json = await res.json();
         if (!res.ok) throw new Error(json?.error ?? "Load failed");
 
+        const criteria = Array.isArray(json?.criteria) ? json.criteria : [];
+
         setData({
           tasting: {
             title: String(json?.tasting?.title ?? ""),
@@ -54,23 +67,53 @@ export default function WineRatePage({
             status: String(json?.tasting?.status ?? ""),
             wineCount: Number(json?.tasting?.wineCount ?? 10),
           },
-          criteria: Array.isArray(json?.criteria) ? json.criteria : [],
+          criteria,
           wine: json?.wine ?? null,
         });
 
-        // Optional: Scores initialisieren (damit Slider nicht "springen")
-        const initial: Record<string, number> = {};
-        for (const c of (Array.isArray(json?.criteria) ? json.criteria : []) as any[]) {
+        // A) Defaults für Scores (damit Slider nicht springen)
+        const defaults: Record<string, number> = {};
+        for (const c of criteria as any[]) {
           const id = String(c.id ?? "");
           const min = typeof c.scaleMin === "number" ? c.scaleMin : 1;
-          if (id) initial[id] = min;
+          if (id) defaults[id] = min;
         }
-        setScores((prev) => (Object.keys(prev).length ? prev : initial));
+
+        // B) Draft aus sessionStorage pro Wein laden (falls vorhanden)
+        let draft: Draft | null = null;
+        try {
+          const raw = sessionStorage.getItem(draftKey(slug, blindNumber));
+          if (raw) draft = JSON.parse(raw);
+        } catch {
+          draft = null;
+        }
+
+        // Draft gewinnt, ansonsten Defaults
+        const mergedScores = { ...defaults, ...(draft?.scores ?? {}) };
+        setScores(mergedScores);
+        setComment(typeof draft?.comment === "string" ? draft!.comment : "");
       } catch (e: any) {
         setMsg(e?.message ?? "Load failed");
       }
     })();
   }, [slug, blindNumber]);
+
+  // 2) Auto-Draft speichern (bei jeder Änderung)
+  useEffect(() => {
+    // erst speichern, wenn wir Daten/Criteria haben (sonst unnötige Drafts)
+    if (!data) return;
+
+    try {
+      const payload: Draft = {
+        scores: scores ?? {},
+        comment: comment ?? "",
+        updatedAt: Date.now(),
+      };
+      sessionStorage.setItem(draftKey(slug, blindNumber), JSON.stringify(payload));
+    } catch {
+      // ignore
+    }
+  }, [data, slug, blindNumber, scores, comment]);
 
   const orderedCriteria = useMemo(
     () => (data?.criteria ?? []).slice().sort((a, b) => a.order - b.order),
