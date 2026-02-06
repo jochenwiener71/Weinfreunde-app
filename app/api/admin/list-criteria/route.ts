@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import admin from "firebase-admin";
 import { db } from "@/lib/firebaseAdmin";
+import { requireAdminSecret } from "@/lib/security";
 
-async function getTastingRefByPublicSlug(publicSlug: string) {
-  const snap = await db
+async function getTastingRefByPublicSlug(publicSlug: string): Promise<admin.firestore.DocumentReference | null> {
+  const snap = await db()
     .collection("tastings")
     .where("publicSlug", "==", publicSlug)
     .limit(1)
@@ -12,23 +14,17 @@ async function getTastingRefByPublicSlug(publicSlug: string) {
   return snap.docs[0].ref;
 }
 
-function assertAdmin(reqSecret: string | null) {
-  const expected = String(process.env.ADMIN_SECRET ?? "").trim();
-  if (!expected) throw new Error("Server misconfigured: ADMIN_SECRET is not set.");
-  if (!reqSecret || reqSecret.trim() !== expected) throw new Error("Unauthorized: invalid ADMIN_SECRET.");
-}
-
 export async function GET(req: Request) {
   try {
+    // ✅ konsistent wie deine anderen Admin-Routen: Secret kommt aus Header "x-admin-secret"
+    requireAdminSecret(req);
+
     const url = new URL(req.url);
     const publicSlug = (url.searchParams.get("publicSlug") ?? "").trim();
-    const adminSecret = url.searchParams.get("adminSecret");
 
     if (!publicSlug) {
       return NextResponse.json({ ok: false, error: "Missing publicSlug" }, { status: 400 });
     }
-
-    assertAdmin(adminSecret);
 
     const tastingRef = await getTastingRefByPublicSlug(publicSlug);
     if (!tastingRef) {
