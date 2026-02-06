@@ -1,41 +1,46 @@
+// lib/session.ts
 import { cookies } from "next/headers";
-import crypto from "crypto";
 
-const COOKIE_NAME = "wf_session";
-const SESSION_SECRET = process.env.SESSION_SECRET ?? "dev-session-secret-change-me";
+const SESSION_COOKIE = "wf_session";
 
 type SessionData = {
   tastingId: string;
   participantId: string;
 };
 
-function sign(value: string): string {
-  return crypto.createHmac("sha256", SESSION_SECRET).update(value).digest("hex");
-}
-
+/**
+ * Wird beim Join aufgerufen
+ */
 export async function createSession(data: SessionData) {
-  const payload = Buffer.from(JSON.stringify(data)).toString("base64url");
-  const signature = sign(payload);
+  const value = Buffer.from(JSON.stringify(data)).toString("base64");
 
-  cookies().set(COOKIE_NAME, `${payload}.${signature}`, {
+  cookies().set(SESSION_COOKIE, value, {
     httpOnly: true,
     sameSite: "lax",
-    secure: true,
+    secure: process.env.NODE_ENV === "production",
     path: "/",
+    maxAge: 60 * 60 * 12, // 12h
   });
 }
 
-export async function requireSession(): Promise<SessionData | null> {
-  const raw = cookies().get(COOKIE_NAME)?.value;
-  if (!raw) return null;
-
-  const [payload, signature] = raw.split(".");
-  if (!payload || !signature) return null;
-  if (sign(payload) !== signature) return null;
+/**
+ * ✅ NEU: Session lesen (für Rating, Navigation, etc.)
+ */
+export async function getSession(): Promise<SessionData | null> {
+  const c = cookies().get(SESSION_COOKIE);
+  if (!c?.value) return null;
 
   try {
-    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    const json = Buffer.from(c.value, "base64").toString("utf8");
+    return JSON.parse(json) as SessionData;
   } catch {
     return null;
   }
+}
+
+/**
+ * Optional, aber sauber
+ */
+export async function clearSession() {
+  cookies().delete(SESSION_COOKIE);
 }
