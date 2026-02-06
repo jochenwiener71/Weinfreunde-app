@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type PublicData = {
   tasting: {
@@ -24,12 +24,7 @@ type PublicData = {
 type Draft = {
   scores: Record<string, number>;
   comment: string;
-  updatedAt: number;
 };
-
-function draftKey(slug: string, blindNumber: number) {
-  return `wf_draft_${slug}__${blindNumber}`;
-}
 
 export default function WineRatePage({
   params,
@@ -45,11 +40,17 @@ export default function WineRatePage({
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // 1) Public Daten (Tasting + Criteria + Wine) laden
+  const draftSaveTimer = useRef<any>(null);
+  const draftHydrated = useRef(false);
+
+  // 1) Public Daten laden + Draft laden
   useEffect(() => {
     (async () => {
       setMsg(null);
+      draftHydrated.current = false;
+
       try {
+        // A) Public (criteria etc.)
         const res = await fetch(
           `/api/tasting/public?slug=${encodeURIComponent(slug)}&blindNumber=${encodeURIComponent(
             String(blindNumber)
@@ -71,7 +72,7 @@ export default function WineRatePage({
           wine: json?.wine ?? null,
         });
 
-        // A) Defaults für Scores (damit Slider nicht springen)
+        // Defaults (Min-Werte)
         const defaults: Record<string, number> = {};
         for (const c of criteria as any[]) {
           const id = String(c.id ?? "");
@@ -79,40 +80,56 @@ export default function WineRatePage({
           if (id) defaults[id] = min;
         }
 
-        // B) Draft aus sessionStorage pro Wein laden (falls vorhanden)
+        // B) Draft vom Server (falls eingeloggt)
         let draft: Draft | null = null;
         try {
-          const raw = sessionStorage.getItem(draftKey(slug, blindNumber));
-          if (raw) draft = JSON.parse(raw);
+          const dr = await fetch(
+            `/api/rating/draft?slug=${encodeURIComponent(slug)}&blindNumber=${encodeURIComponent(String(blindNumber))}`,
+            { cache: "no-store" }
+          );
+          const dj = await dr.json().catch(() => ({}));
+          if (dr.ok && dj?.draft) {
+            draft = {
+              scores: (dj.draft.scores ?? {}) as Record<string, number>,
+              comment: String(dj.draft.comment ?? ""),
+            };
+          }
         } catch {
-          draft = null;
+          // ignore (z.B. not logged in)
         }
 
-        // Draft gewinnt, ansonsten Defaults
-        const mergedScores = { ...defaults, ...(draft?.scores ?? {}) };
-        setScores(mergedScores);
-        setComment(typeof draft?.comment === "string" ? draft!.comment : "");
+        // Draft gewinnt, Defaults füllen nur fehlende Werte
+        setScores({ ...defaults, ...(draft?.scores ?? {}) });
+        setComment(draft?.comment ?? "");
+
+        draftHydrated.current = true;
       } catch (e: any) {
         setMsg(e?.message ?? "Load failed");
       }
     })();
   }, [slug, blindNumber]);
 
-  // 2) Auto-Draft speichern (bei jeder Änderung)
+  // 2) Draft autosave (debounced 600ms) → Firestore
   useEffect(() => {
-    // erst speichern, wenn wir Daten/Criteria haben (sonst unnötige Drafts)
     if (!data) return;
+    if (!draftHydrated.current) return;
 
-    try {
-      const payload: Draft = {
-        scores: scores ?? {},
-        comment: comment ?? "",
-        updatedAt: Date.now(),
-      };
-      sessionStorage.setItem(draftKey(slug, blindNumber), JSON.stringify(payload));
-    } catch {
-      // ignore
-    }
+    if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+    draftSaveTimer.current = setTimeout(async () => {
+      try {
+        await fetch("/api/rating/draft", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ slug, blindNumber, scores, comment }),
+        });
+      } catch {
+        // ignore (offline etc.)
+      }
+    }, 600);
+
+    return () => {
+      if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+    };
   }, [data, slug, blindNumber, scores, comment]);
 
   const orderedCriteria = useMemo(
@@ -166,7 +183,6 @@ export default function WineRatePage({
 
   return (
     <div style={pageStyle}>
-      {/* Background wie Join */}
       <div
         style={{
           position: "absolute",
@@ -189,7 +205,6 @@ export default function WineRatePage({
 
       <div style={centerWrapStyle}>
         <div style={cardStyle}>
-          {/* Top Nav */}
           <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
             <a href={`/t/${encodeURIComponent(slug)}`} style={ghostLinkStyle}>
               ← Übersicht
@@ -233,7 +248,6 @@ export default function WineRatePage({
             </p>
           )}
 
-          {/* Wein-Details */}
           {wineTitleLine && (
             <div style={wineInfoStyle}>
               <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>Wein-Details</div>
@@ -262,9 +276,7 @@ export default function WineRatePage({
                   min={c.scaleMin}
                   max={c.scaleMax}
                   value={current}
-                  onChange={(e) =>
-                    setScores((s) => ({ ...s, [c.id]: Number(e.target.value) }))
-                  }
+                  onChange={(e) => setScores((s) => ({ ...s, [c.id]: Number(e.target.value) }))}
                   style={{ width: "100%", marginTop: 10 }}
                 />
               </div>
@@ -300,16 +312,14 @@ export default function WineRatePage({
             </p>
           )}
 
-          <p style={footerStyle}>
-            Tipp: Du kannst direkt mit „Weiter“ zum nächsten Wein springen.
-          </p>
+          <p style={footerStyle}>Tipp: Du kannst direkt mit „Weiter“ zum nächsten Wein springen.</p>
         </div>
       </div>
     </div>
   );
 }
 
-/* Styles (wie Join: Card + Background) */
+/* Styles */
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
   position: "relative",
