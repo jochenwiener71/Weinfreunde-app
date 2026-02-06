@@ -1,52 +1,82 @@
 import { NextResponse } from "next/server";
+import admin from "firebase-admin";
 import { db } from "@/lib/firebaseAdmin";
 import { requireAdminSecret } from "@/lib/security";
 
-export async function POST(req: Request) {
+async function getTastingDocByPublicSlug(publicSlug: string) {
+  const snap = await db()
+    .collection("tastings")
+    .where("publicSlug", "==", publicSlug)
+    .limit(1)
+    .get();
+
+  if (snap.empty) return null;
+  return snap.docs[0];
+}
+
+// Optional: löscht auch Ratings des Teilnehmers (damit Reporting sauber bleibt)
+async function deleteRatingsForParticipant(
+  tastingRef: admin.firestore.DocumentReference,
+  participantId: string
+) {
+  const ratingsRef = tastingRef.collection("ratings");
+  const q = await ratingsRef.where("participantId", "==", participantId).get();
+  if (q.empty) return 0;
+
+  let deleted = 0;
+  let batch = db().batch();
+  let ops = 0;
+
+  for (const doc of q.docs) {
+    batch.delete(doc.ref);
+    ops++;
+    deleted++;
+
+    // Firestore Batch limit ~500
+    if (ops >= 450) {
+      await batch.commit();
+      batch = db().batch();
+      ops = 0;
+    }
+  }
+
+  if (ops > 0) await batch.commit();
+  return deleted;
+}
+
+export async function DELETE(req: Request) {
   try {
     requireAdminSecret(req);
 
-    const body = await req.json();
-    const publicSlug = String(body.publicSlug ?? "").trim();
-    const participantId = String(body.participantId ?? "").trim();
+    const { searchParams } = new URL(req.url) ;
+    const publicSlug = String(searchParams.get("publicSlug") ?? "").trim();
+    const participantId = String(searchParams.get("participantId") ?? "").trim();
 
-    if (!publicSlug || !participantId) {
-      return NextResponse.json({ error: "Missing input" }, { status: 400 });
+    if (!publicSlug) {
+      return NextResponse.json({ error: "Missing publicSlug" }, { status: 400 });
+    }
+    if (!participantId) {
+      return NextResponse.json({ error: "Missing participantId" }, { status: 400 });
     }
 
-    // find tasting
-    const tSnap = await db()
-      .collection("tastings")
-      .where("publicSlug", "==", publicSlug)
-      .limit(1)
-      .get();
-
-    if (tSnap.empty) {
+    const tDoc = await getTastingDocByPublicSlug(publicSlug);
+    if (!tDoc) {
       return NextResponse.json({ error: "Tasting not found" }, { status: 404 });
     }
 
-    const tRef = tSnap.docs[0].ref;
-    const batch = db().batch();
+    const pRef = tDoc.ref.collection("participants").doc(participantId);
+    const pSnap = await pRef.get();
+    if (!pSnap.exists) {
+      return NextResponse.json({ error: "Participant not found" }, { status: 404 });
+    }
 
-    // 1️⃣ delete ratings of participant
-    const rSnap = await tRef
-      .collection("ratings")
-      .where("participantId", "==", participantId)
-      .get();
+    // 1) Participant löschen
+    await pRef.delete();
 
-    rSnap.docs.forEach((doc) => batch.delete(doc.ref));
+    // 2) Optional Ratings löschen
+    const ratingsDeleted = await deleteRatingsForParticipant(tDoc.ref, participantId);
 
-    // 2️⃣ delete participant
-    const pRef = tRef.collection("participants").doc(participantId);
-    batch.delete(pRef);
-
-    await batch.commit();
-
-    return NextResponse.json({
-      ok: true,
-      deletedRatings: rSnap.size,
-      participantId,
-    });
+    return NextResponse.json({ ok: true, ratingsDeleted });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? "Error" }, { status: 500 });
   }
