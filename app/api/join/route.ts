@@ -1,3 +1,4 @@
+// app/api/join/route.ts
 import { NextResponse } from "next/server";
 import admin from "firebase-admin";
 import { db } from "@/lib/firebaseAdmin";
@@ -7,9 +8,13 @@ import { createSession } from "@/lib/session";
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+
     const slug = String(body.slug ?? "").trim();
     const pin = String(body.pin ?? "").trim();
+
+    // Join-UI sendet i.d.R. "alias" (Vorname). Wir speichern konsistent als "name".
     const alias = String(body.alias ?? "").trim();
+    const name = alias; // ✅ einheitlich
 
     if (!slug || !/^\d{4}$/.test(pin)) {
       return NextResponse.json({ error: "Invalid input" }, { status: 400 });
@@ -37,25 +42,43 @@ export async function POST(req: Request) {
     }
 
     const participantsRef = tastingDoc.ref.collection("participants");
-    const snap = await participantsRef.get();
 
-    if (snap.size >= (tasting.maxParticipants ?? 10)) {
+    // ✅ WICHTIG: "full" zählt nur aktive Teilnehmer (nicht alle Docs)
+    const maxParticipants =
+      typeof tasting.maxParticipants === "number" && tasting.maxParticipants > 0
+        ? tasting.maxParticipants
+        : 10;
+
+    const activeSnap = await participantsRef.where("isActive", "==", true).get();
+
+    if (activeSnap.size >= maxParticipants) {
       return NextResponse.json({ error: "Tasting full" }, { status: 409 });
     }
 
+    // ✅ neuen Teilnehmer anlegen
     const pRef = participantsRef.doc();
-    await pRef.set({
-      alias: alias || `Teilnehmer ${snap.size + 1}`,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    const now = admin.firestore.FieldValue.serverTimestamp();
+
+    await pRef.set(
+      {
+        // ✅ neue, konsistente Felder:
+        name: name || `Teilnehmer ${activeSnap.size + 1}`,
+        isActive: true,
+
+        // ✅ Backward compatible (falls andere Stellen noch alias nutzen):
+        alias: name || `Teilnehmer ${activeSnap.size + 1}`,
+
+        createdAt: now,
+        joinedAt: now,
+        lastSeenAt: now,
+      },
+      { merge: true }
+    );
 
     await createSession({ tastingId: tastingDoc.id, participantId: pRef.id });
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, participantId: pRef.id });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message ?? "Join failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message ?? "Join failed" }, { status: 500 });
   }
 }
