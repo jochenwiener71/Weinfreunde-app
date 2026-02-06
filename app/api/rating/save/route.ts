@@ -3,55 +3,42 @@ import admin from "firebase-admin";
 import { db } from "@/lib/firebaseAdmin";
 import { requireSession } from "@/lib/session";
 
+type ScoresMap = Record<string, number>;
+
 export async function POST(req: Request) {
   try {
-    const session = await requireSession();
-    if (!session) {
-      return NextResponse.json({ error: "Not logged in" }, { status: 401 });
-    }
+    const session = requireSession();
 
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const slug = String(body.slug ?? "").trim();
     const blindNumber = Number(body.blindNumber);
-    const scores = body.scores ?? {};
+    const scores: ScoresMap = body.scores ?? {};
     const comment = String(body.comment ?? "").trim();
 
-    if (!Number.isInteger(blindNumber) || blindNumber < 1 || blindNumber > 10) {
-      return NextResponse.json({ error: "Invalid blindNumber" }, { status: 400 });
-    }
-    if (typeof scores !== "object" || Array.isArray(scores)) {
-      return NextResponse.json({ error: "scores must be an object" }, { status: 400 });
+    if (!slug || !Number.isFinite(blindNumber) || blindNumber < 1) {
+      return NextResponse.json({ error: "Invalid input" }, { status: 400 });
     }
 
-    const winesQ = await db()
-      .collection("tastings")
-      .doc(session.tastingId)
-      .collection("wines")
-      .where("blindNumber", "==", blindNumber)
-      .limit(1)
-      .get();
+    const q = await db().collection("tastings").where("publicSlug", "==", slug).limit(1).get();
+    if (q.empty) return NextResponse.json({ error: "Tasting not found" }, { status: 404 });
 
-    if (winesQ.empty) {
-      return NextResponse.json({ error: "Wine not found" }, { status: 404 });
-    }
+    const tastingDoc = q.docs[0];
 
-    const wineId = winesQ.docs[0].id;
-    const ratingId = `${session.participantId}_${wineId}`;
+    // simple upsert: ratings/{participantId_wineX}
+    const ratingId = `${session.participantId}_wine_${blindNumber}`;
+    const ref = tastingDoc.ref.collection("ratings").doc(ratingId);
 
-    await db()
-      .collection("tastings")
-      .doc(session.tastingId)
-      .collection("ratings")
-      .doc(ratingId)
-      .set(
-        {
-          participantId: session.participantId,
-          wineId,
-          scores,
-          comment: comment || null,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
+    await ref.set(
+      {
+        participantId: session.participantId,
+        blindNumber,
+        scores,
+        comment: comment || null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
