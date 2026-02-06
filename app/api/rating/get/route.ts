@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
-import admin from "firebase-admin";
 import { db } from "@/lib/firebaseAdmin";
 import { requireSession } from "@/lib/session";
 
 export async function GET(req: Request) {
   try {
-    // 🔐 Session prüfen (Teilnehmer muss eingeloggt sein)
     const session = requireSession();
 
     const { searchParams } = new URL(req.url);
@@ -19,7 +17,6 @@ export async function GET(req: Request) {
       );
     }
 
-    // 🍷 Tasting finden
     const q = await db()
       .collection("tastings")
       .where("publicSlug", "==", slug)
@@ -35,21 +32,13 @@ export async function GET(req: Request) {
 
     const tastingDoc = q.docs[0];
 
-    // 🔑 MUSS exakt zu /api/rating/save passen
+    // Muss zu /api/rating/save passen:
     // ratingId = `${participantId}_wine_${blindNumber}`
     const ratingId = `${session.participantId}_wine_${blindNumber}`;
-
-    const doc = await tastingDoc.ref
-      .collection("ratings")
-      .doc(ratingId)
-      .get();
+    const doc = await tastingDoc.ref.collection("ratings").doc(ratingId).get();
 
     if (!doc.exists) {
-      return NextResponse.json({
-        ok: true,
-        exists: false,
-        rating: null,
-      });
+      return NextResponse.json({ ok: true, exists: false, rating: null });
     }
 
     return NextResponse.json({
