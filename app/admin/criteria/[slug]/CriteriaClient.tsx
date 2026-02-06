@@ -42,6 +42,15 @@ function safeNum(v: any, fallback: number) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+async function readJson(res: Response) {
+  const text = await res.text();
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return { error: text || `HTTP ${res.status}` };
+  }
+}
+
 export default function CriteriaClient({ slug }: { slug: string }) {
   const [adminSecret, setAdminSecret] = useState("");
   const [loading, setLoading] = useState(false);
@@ -70,13 +79,14 @@ export default function CriteriaClient({ slug }: { slug: string }) {
   const canLoad = useMemo(() => adminSecret.trim().length > 0, [adminSecret]);
 
   async function apiFetch(url: string, init?: RequestInit) {
-    // Wir senden das Secret im Header (Standard) – falls deine API zusätzlich Body erwartet, ist es bei POST unten drin.
     const headers: Record<string, string> = {
       ...(init?.headers as any),
-      "x-admin-secret": adminSecret.trim(),
+      "x-admin-secret": adminSecret.trim(), // Header-Auth (falls API so prüft)
     };
-    const res = await fetch(url, { ...init, headers });
-    const data = await res.json().catch(() => ({}));
+
+    const res = await fetch(url, { ...init, headers, cache: "no-store" });
+    const data = await readJson(res);
+
     if (!res.ok) {
       const err = data?.error || data?.message || `HTTP ${res.status}`;
       throw new Error(err);
@@ -88,8 +98,21 @@ export default function CriteriaClient({ slug }: { slug: string }) {
     setLoading(true);
     setMsg(null);
     try {
-      const data = await apiFetch(`/api/admin/list-criteria?publicSlug=${encodeURIComponent(slug)}`);
-      const arr: Criterion[] = Array.isArray(data?.criteria) ? data.criteria : Array.isArray(data) ? data : [];
+      // ✅ WICHTIG: Viele deiner API-Versionen prüfen adminSecret in der Query.
+      // Wir schicken daher BEIDES: Query + Header.
+      const url =
+        `/api/admin/list-criteria` +
+        `?publicSlug=${encodeURIComponent(slug)}` +
+        `&adminSecret=${encodeURIComponent(adminSecret.trim())}`;
+
+      const data = await apiFetch(url);
+
+      const arr: Criterion[] = Array.isArray(data?.criteria)
+        ? data.criteria
+        : Array.isArray(data)
+        ? data
+        : [];
+
       // Sort stabil (order -> label -> id)
       arr.sort((a, b) => {
         const ao = safeNum(a.order, 999999);
@@ -100,6 +123,7 @@ export default function CriteriaClient({ slug }: { slug: string }) {
         if (al !== bl) return al.localeCompare(bl);
         return String(a.id).localeCompare(String(b.id));
       });
+
       setCriteria(arr);
       setMsg(`Geladen: ${arr.length} Kriterien ✅`);
     } catch (e: any) {
@@ -134,7 +158,6 @@ export default function CriteriaClient({ slug }: { slug: string }) {
     try {
       const payload = {
         publicSlug: slug,
-        // viele deiner Admin-Routen arbeiten so – falls deine Route andere Feldnamen nutzt, passt du nur hier an
         criterion: {
           id: c._isNew ? undefined : c.id,
           label: c.label ?? c.name ?? "",
@@ -142,7 +165,8 @@ export default function CriteriaClient({ slug }: { slug: string }) {
           order: safeNum(c.order, 1),
           isActive: !!c.isActive,
         },
-        adminSecret: adminSecret.trim(), // falls die Route Body-check macht
+        // falls Route Body-check macht:
+        adminSecret: adminSecret.trim(),
       };
 
       const data = await apiFetch(`/api/admin/upsert-criterion`, {
@@ -151,7 +175,6 @@ export default function CriteriaClient({ slug }: { slug: string }) {
         body: JSON.stringify(payload),
       });
 
-      // Optional: wenn API eine echte ID zurückgibt
       const newId = data?.id || data?.criterion?.id;
       if (c._isNew && newId) {
         setCriteria((prev) => prev.map((x) => (x.id === c.id ? { ...x, id: newId, _isNew: false } : x)));
@@ -177,7 +200,6 @@ export default function CriteriaClient({ slug }: { slug: string }) {
       const payload = {
         publicSlug: slug,
         id: c._isNew ? undefined : c.id,
-        // falls du bei New noch nicht gespeichert hast: dann nur lokal entfernen
         adminSecret: adminSecret.trim(),
       };
 
@@ -222,27 +244,18 @@ export default function CriteriaClient({ slug }: { slug: string }) {
           ← Admin Dashboard
         </Link>
 
-        <button onClick={addNew} style={btn(false)} disabled={!canLoad}>
+        <button type="button" onClick={addNew} style={btn(false)} disabled={!canLoad}>
           + Neues Kriterium
         </button>
 
-        <button onClick={loadCriteria} style={btn(false)} disabled={!canLoad || loading}>
+        <button type="button" onClick={loadCriteria} style={btn(false)} disabled={!canLoad || loading}>
           {loading ? "Lade…" : "Kriterien laden"}
         </button>
 
-        <span style={{ opacity: 0.7, fontSize: 13 }}>
-          {criteria.length ? `Aktuell: ${criteria.length}` : ""}
-        </span>
+        <span style={{ opacity: 0.7, fontSize: 13 }}>{criteria.length ? `Aktuell: ${criteria.length}` : ""}</span>
       </div>
 
-      <section
-        style={{
-          marginTop: 14,
-          border: "1px solid rgba(0,0,0,0.12)",
-          borderRadius: 12,
-          padding: 14,
-        }}
-      >
+      <section style={{ marginTop: 14, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 12, padding: 14 }}>
         <label style={{ display: "block", fontSize: 12, opacity: 0.7 }}>ADMIN_SECRET</label>
         <input
           value={adminSecret}
@@ -253,11 +266,7 @@ export default function CriteriaClient({ slug }: { slug: string }) {
           autoCorrect="off"
         />
 
-        {msg && (
-          <p style={{ marginTop: 10, marginBottom: 0, fontSize: 13, opacity: 0.85 }}>
-            {msg}
-          </p>
-        )}
+        {msg && <p style={{ marginTop: 10, marginBottom: 0, fontSize: 13, opacity: 0.85 }}>{msg}</p>}
       </section>
 
       <section style={{ marginTop: 16 }}>
@@ -327,10 +336,10 @@ export default function CriteriaClient({ slug }: { slug: string }) {
             </label>
 
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
-              <button style={btn(false)} disabled={loading || !canLoad} onClick={() => saveCriterion(c)}>
+              <button type="button" style={btn(false)} disabled={loading || !canLoad} onClick={() => saveCriterion(c)}>
                 Speichern
               </button>
-              <button style={btn(false)} disabled={loading || !canLoad} onClick={() => deleteCriterion(c)}>
+              <button type="button" style={btn(false)} disabled={loading || !canLoad} onClick={() => deleteCriterion(c)}>
                 Löschen
               </button>
             </div>
@@ -338,16 +347,14 @@ export default function CriteriaClient({ slug }: { slug: string }) {
         ))}
 
         {!criteria.length && (
-          <p style={{ marginTop: 14, opacity: 0.7 }}>
-            Noch keine Kriterien geladen. ADMIN_SECRET eintragen → „Kriterien laden“.
-          </p>
+          <p style={{ marginTop: 14, opacity: 0.7 }}>Noch keine Kriterien geladen. ADMIN_SECRET eintragen → „Kriterien laden“.</p>
         )}
       </section>
 
       <p style={{ marginTop: 16, fontSize: 12, opacity: 0.7 }}>
         Hinweis: Diese UI ruft <code>/api/admin/list-criteria</code>, <code>/api/admin/upsert-criterion</code>,{" "}
-        <code>/api/admin/delete-criterion</code> auf und sendet das Secret als Header <code>x-admin-secret</code>{" "}
-        (und zusätzlich bei POST im Body, falls du das so prüfst).
+        <code>/api/admin/delete-criterion</code> auf und sendet das Secret als Header <code>x-admin-secret</code> und
+        bei <code>list-criteria</code> zusätzlich als Query <code>adminSecret</code> (Fallback).
       </p>
     </main>
   );
