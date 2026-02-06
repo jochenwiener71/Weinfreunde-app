@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type PublicData = {
   tasting: {
@@ -21,16 +21,11 @@ type PublicData = {
   } | null;
 };
 
-type Draft = {
-  scores: Record<string, number>;
-  comment: string;
-};
+function draftKey(slug: string, blindNumber: number) {
+  return `wf_draft_${slug}_${blindNumber}`;
+}
 
-export default function WineRatePage({
-  params,
-}: {
-  params: { slug: string; blindNumber: string };
-}) {
+export default function WineRatePage({ params }: { params: { slug: string; blindNumber: string } }) {
   const slug = decodeURIComponent(params.slug);
   const blindNumber = Number(params.blindNumber);
 
@@ -40,21 +35,39 @@ export default function WineRatePage({
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const draftSaveTimer = useRef<any>(null);
-  const draftHydrated = useRef(false);
+  // ✅ Draft aus sessionStorage wiederherstellen (damit Zurück/Weiter nichts verliert)
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(draftKey(slug, blindNumber));
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed?.scores && typeof parsed.scores === "object") setScores(parsed.scores);
+      if (typeof parsed?.comment === "string") setComment(parsed.comment);
+    } catch {
+      // ignore
+    }
+  }, [slug, blindNumber]);
 
-  // 1) Public Daten laden + Draft laden
+  // ✅ Draft laufend speichern
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        draftKey(slug, blindNumber),
+        JSON.stringify({ scores, comment })
+      );
+    } catch {
+      // ignore
+    }
+  }, [slug, blindNumber, scores, comment]);
+
+  // ✅ Public-Daten laden
   useEffect(() => {
     (async () => {
       setMsg(null);
-      draftHydrated.current = false;
-
       try {
-        // A) Public (criteria etc.)
         const res = await fetch(
-          `/api/tasting/public?slug=${encodeURIComponent(slug)}&blindNumber=${encodeURIComponent(
-            String(blindNumber)
-          )}`
+          `/api/tasting/public?slug=${encodeURIComponent(slug)}&blindNumber=${encodeURIComponent(String(blindNumber))}`,
+          { cache: "no-store" }
         );
         const json = await res.json();
         if (!res.ok) throw new Error(json?.error ?? "Load failed");
@@ -72,68 +85,25 @@ export default function WineRatePage({
           wine: json?.wine ?? null,
         });
 
-        // Defaults (Min-Werte)
-        const defaults: Record<string, number> = {};
-        for (const c of criteria as any[]) {
-          const id = String(c.id ?? "");
-          const min = typeof c.scaleMin === "number" ? c.scaleMin : 1;
-          if (id) defaults[id] = min;
-        }
-
-        // B) Draft vom Server (falls eingeloggt)
-        let draft: Draft | null = null;
-        try {
-          const dr = await fetch(
-            `/api/rating/draft?slug=${encodeURIComponent(slug)}&blindNumber=${encodeURIComponent(String(blindNumber))}`,
-            { cache: "no-store" }
-          );
-          const dj = await dr.json().catch(() => ({}));
-          if (dr.ok && dj?.draft) {
-            draft = {
-              scores: (dj.draft.scores ?? {}) as Record<string, number>,
-              comment: String(dj.draft.comment ?? ""),
-            };
+        // ✅ Scores initialisieren, aber Draft nicht überschreiben
+        setScores((prev) => {
+          if (Object.keys(prev).length) return prev;
+          const initial: Record<string, number> = {};
+          for (const c of criteria as any[]) {
+            const id = String(c.id ?? "");
+            const min = typeof c.scaleMin === "number" ? c.scaleMin : 1;
+            if (id) initial[id] = min;
           }
-        } catch {
-          // ignore (z.B. not logged in)
-        }
-
-        // Draft gewinnt, Defaults füllen nur fehlende Werte
-        setScores({ ...defaults, ...(draft?.scores ?? {}) });
-        setComment(draft?.comment ?? "");
-
-        draftHydrated.current = true;
+          return initial;
+        });
       } catch (e: any) {
         setMsg(e?.message ?? "Load failed");
       }
     })();
   }, [slug, blindNumber]);
 
-  // 2) Draft autosave (debounced 600ms) → Firestore
-  useEffect(() => {
-    if (!data) return;
-    if (!draftHydrated.current) return;
-
-    if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
-    draftSaveTimer.current = setTimeout(async () => {
-      try {
-        await fetch("/api/rating/draft", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ slug, blindNumber, scores, comment }),
-        });
-      } catch {
-        // ignore (offline etc.)
-      }
-    }, 600);
-
-    return () => {
-      if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
-    };
-  }, [data, slug, blindNumber, scores, comment]);
-
   const orderedCriteria = useMemo(
-    () => (data?.criteria ?? []).slice().sort((a, b) => a.order - b.order),
+    () => (data?.criteria ?? []).slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
     [data]
   );
 
@@ -173,6 +143,12 @@ export default function WineRatePage({
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error ?? "Save failed");
+
+      // ✅ Draft nach erfolgreichem Save löschen
+      try {
+        sessionStorage.removeItem(draftKey(slug, blindNumber));
+      } catch {}
+
       setMsg("Gespeichert ✅");
     } catch (e: any) {
       setMsg(e?.message ?? "Fehler");
