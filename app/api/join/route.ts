@@ -33,12 +33,14 @@ export async function POST(req: Request) {
 
     const tastingDoc = snap.docs[0];
 
-    // 🔐 PIN prüfen + Participant holen/erzeugen
-    const result = await verifyPin({
-      tastingId: tastingDoc.id,
-      name: String(name).trim(),
-      pin: String(pin).trim(),
-    });
+    // 🔐 PIN prüfen (RICHTIGE SIGNATUR)
+    const result = await verifyPin(
+      tastingDoc.id,
+      {
+        name: String(name).trim(),
+        pin: String(pin).trim(),
+      }
+    );
 
     if (!result.ok) {
       return NextResponse.json(
@@ -47,7 +49,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ SESSION SETZEN (WICHTIG: inkl. name)
+    // ✅ Session setzen
     await createSession({
       tastingId: tastingDoc.id,
       participantId: result.participantId,
