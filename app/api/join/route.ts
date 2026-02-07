@@ -33,13 +33,11 @@ export async function POST(req: Request) {
 
     const tastingDoc = snap.docs[0];
 
-    // 🔐 PIN prüfen (RICHTIGE SIGNATUR)
+    // 🔐 PIN prüfen (RICHTIGE Signatur: 3 Parameter)
     const result = await verifyPin(
       tastingDoc.id,
-      {
-        name: String(name).trim(),
-        pin: String(pin).trim(),
-      }
+      String(name).trim(),
+      String(pin).trim()
     );
 
     if (!result.ok) {
