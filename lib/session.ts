@@ -45,16 +45,28 @@ function safeJsonParse<T>(s: string): T | null {
   }
 }
 
-// ---------- API ----------
-export async function createSession(data: SessionData) {
-  const payload = {
-    ...data,
-    iat: Date.now(),
-  };
-
+function makeToken(data: SessionData) {
+  const payload = { ...data, iat: Date.now() };
   const payloadJson = JSON.stringify(payload);
-  const token = `${base64urlEncode(Buffer.from(payloadJson, "utf8"))}.${sign(payloadJson)}`;
+  return `${base64urlEncode(Buffer.from(payloadJson, "utf8"))}.${sign(payloadJson)}`;
+}
 
+function setCookieOn(target: any, token: string) {
+  // If we have a NextResponse-like object with res.cookies.set(...)
+  if (target && typeof target === "object" && target.cookies && typeof target.cookies.set === "function") {
+    target.cookies.set({
+      name: COOKIE_NAME,
+      value: token,
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 30,
+    });
+    return;
+  }
+
+  // Fallback: set cookie via next/headers cookies()
   cookies().set({
     name: COOKIE_NAME,
     value: token,
@@ -62,37 +74,62 @@ export async function createSession(data: SessionData) {
     secure: true,
     sameSite: "lax",
     path: "/",
-    // optional: 30 Tage
     maxAge: 60 * 60 * 24 * 30,
   });
 }
 
+// ---------- API ----------
+export async function createSession(data: SessionData) {
+  const token = makeToken(data);
+  setCookieOn(null, token);
+}
+
 /**
- * ✅ Compatibility export:
- * Manche Routes importieren "setSessionCookie".
- * Unterstützt beide Varianten:
- *  - setSessionCookie({ tastingId, participantId, name })
- *  - setSessionCookie(tastingId, participantId, name)
+ * ✅ Compatibility export: setSessionCookie
+ *
+ * Unterstützt ALLE Varianten, die bei dir im Projekt vorkommen:
+ * 1) setSessionCookie({ tastingId, participantId, name })
+ * 2) setSessionCookie(tastingId, participantId, name)
+ * 3) setSessionCookie(res, { tastingId, participantId, participantName | name })
  */
 export async function setSessionCookie(data: SessionData): Promise<void>;
+export async function setSessionCookie(tastingId: string, participantId: string, name: string): Promise<void>;
 export async function setSessionCookie(
-  tastingId: string,
-  participantId: string,
-  name: string
+  res: any,
+  data: { tastingId: string; participantId: string; participantName?: string; name?: string }
 ): Promise<void>;
-export async function setSessionCookie(
-  a: SessionData | string,
-  b?: string,
-  c?: string
-) {
+export async function setSessionCookie(a: any, b?: any, c?: any) {
+  // 3 args: (tastingId, participantId, name)
   if (typeof a === "string") {
-    const tastingId = a;
+    const tastingId = String(a).trim();
     const participantId = String(b ?? "").trim();
     const name = String(c ?? "").trim();
-    await createSession({ tastingId, participantId, name });
+    const token = makeToken({ tastingId, participantId, name });
+    setCookieOn(null, token);
     return;
   }
-  await createSession(a);
+
+  // 2 args: (res, payload)
+  if (a && b && typeof b === "object") {
+    const tastingId = String(b.tastingId ?? "").trim();
+    const participantId = String(b.participantId ?? "").trim();
+    const name = String(b.participantName ?? b.name ?? "").trim();
+    const token = makeToken({ tastingId, participantId, name });
+    setCookieOn(a, token);
+    return;
+  }
+
+  // 1 arg: ({ tastingId, participantId, name })
+  if (a && typeof a === "object") {
+    const tastingId = String(a.tastingId ?? "").trim();
+    const participantId = String(a.participantId ?? "").trim();
+    const name = String(a.name ?? "").trim();
+    const token = makeToken({ tastingId, participantId, name });
+    setCookieOn(null, token);
+    return;
+  }
+
+  throw new Error("Invalid setSessionCookie call");
 }
 
 export function clearSession() {
