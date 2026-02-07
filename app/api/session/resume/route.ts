@@ -46,7 +46,6 @@ export async function POST(req: Request) {
       participantId: participantDoc.id,
       participantName: String(p.name ?? name),
       tastingId: tastingDoc.id,
-      publicSlug: slug,
     });
 
     return res;
