@@ -27,6 +27,10 @@ function draftKey(slug: string, blindNumber: number) {
   return `wf_draft_${slug}_wine_${blindNumber}`;
 }
 
+function encode(s: string) {
+  return encodeURIComponent(s);
+}
+
 export default function WineRatePage({
   params,
 }: {
@@ -41,15 +45,19 @@ export default function WineRatePage({
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // ✅ Weiterbewerten-Overlay (Name + PIN)
+  const [showResume, setShowResume] = useState(false);
+  const [resumeName, setResumeName] = useState("");
+  const [resumePin, setResumePin] = useState("");
+  const [resumeLoading, setResumeLoading] = useState(false);
+
   // 1) Public Daten laden (Tasting + Criteria + Wine)
   useEffect(() => {
     (async () => {
       setMsg(null);
       try {
         const res = await fetch(
-          `/api/tasting/public?slug=${encodeURIComponent(slug)}&blindNumber=${encodeURIComponent(
-            String(blindNumber)
-          )}`,
+          `/api/tasting/public?slug=${encode(slug)}&blindNumber=${encode(String(blindNumber))}`,
           { cache: "no-store" }
         );
         const json = await res.json();
@@ -68,7 +76,7 @@ export default function WineRatePage({
           wine: json?.wine ?? null,
         });
 
-        // Default initial scores (min)
+        // Default initial scores (min) – wird später ggf. durch Draft oder Server überschrieben
         const initial: ScoresMap = {};
         for (const c of criteria as any[]) {
           const id = String(c.id ?? "");
@@ -83,7 +91,7 @@ export default function WineRatePage({
     })();
   }, [slug, blindNumber]);
 
-  // 2) Draft aus sessionStorage wiederherstellen
+  // 2) Draft aus sessionStorage wiederherstellen (damit Zurück/Weiter nichts “verliert”)
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem(draftKey(slug, blindNumber));
@@ -96,7 +104,7 @@ export default function WineRatePage({
     }
   }, [slug, blindNumber]);
 
-  // 3) Gespeichertes Rating vom Server laden (falls vorhanden)
+  // 3) Gespeichertes Rating vom Server laden (falls vorhanden) – überschreibt Draft NICHT, wenn Draft existiert
   useEffect(() => {
     (async () => {
       try {
@@ -104,9 +112,7 @@ export default function WineRatePage({
         const hasDraft = !!rawDraft;
 
         const res = await fetch(
-          `/api/rating/get?slug=${encodeURIComponent(slug)}&blindNumber=${encodeURIComponent(
-            String(blindNumber)
-          )}`,
+          `/api/rating/get?slug=${encode(slug)}&blindNumber=${encode(String(blindNumber))}`,
           { cache: "no-store" }
         );
         const json = await res.json();
@@ -123,7 +129,7 @@ export default function WineRatePage({
     })();
   }, [slug, blindNumber]);
 
-  // 4) Draft automatisch speichern
+  // 4) Draft automatisch speichern, sobald der User etwas ändert
   useEffect(() => {
     try {
       sessionStorage.setItem(
@@ -165,6 +171,28 @@ export default function WineRatePage({
     return parts.length ? parts.join(" · ") : null;
   }, [data]);
 
+  // ✅ Session wiederherstellen ohne Join (Name + PIN)
+  async function resumeSession() {
+    setMsg(null);
+    setResumeLoading(true);
+    try {
+      const res = await fetch("/api/session/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug, name: resumeName, pin: resumePin }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? "Resume failed");
+
+      setShowResume(false);
+      setMsg("Weiterbewerten aktiviert ✅");
+    } catch (e: any) {
+      setMsg(e?.message ?? "Resume failed");
+    } finally {
+      setResumeLoading(false);
+    }
+  }
+
   async function save() {
     setMsg(null);
     setLoading(true);
@@ -175,9 +203,17 @@ export default function WineRatePage({
         body: JSON.stringify({ slug, blindNumber, scores, comment }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? "Save failed");
 
-      // Draft löschen
+      if (!res.ok) {
+        const errMsg = String(json?.error ?? "Save failed");
+        if (errMsg.toLowerCase().includes("not logged in")) {
+          setShowResume(true);
+          throw new Error("Sitzung abgelaufen – bitte Name + PIN bestätigen.");
+        }
+        throw new Error(errMsg);
+      }
+
+      // ✅ Draft löschen, weil jetzt server-seitig gespeichert
       try {
         sessionStorage.removeItem(draftKey(slug, blindNumber));
       } catch {
@@ -194,6 +230,7 @@ export default function WineRatePage({
 
   return (
     <div style={pageStyle}>
+      {/* Background wie Join */}
       <div
         style={{
           position: "absolute",
@@ -216,15 +253,16 @@ export default function WineRatePage({
 
       <div style={centerWrapStyle}>
         <div style={cardStyle}>
+          {/* Top Nav */}
           <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
-            <a href={`/t/${encodeURIComponent(slug)}`} style={ghostLinkStyle}>
+            <a href={`/t/${encode(slug)}`} style={ghostLinkStyle}>
               ← Übersicht
             </a>
 
             <div style={{ flex: 1 }} />
 
             <a
-              href={canGoPrev ? `/t/${encodeURIComponent(slug)}/wine/${prevBn}` : "#"}
+              href={canGoPrev ? `/t/${encode(slug)}/wine/${prevBn}` : "#"}
               onClick={(e) => {
                 if (!canGoPrev) e.preventDefault();
               }}
@@ -237,7 +275,7 @@ export default function WineRatePage({
               ← Zurück
             </a>
             <a
-              href={canGoNext ? `/t/${encodeURIComponent(slug)}/wine/${nextBn}` : "#"}
+              href={canGoNext ? `/t/${encode(slug)}/wine/${nextBn}` : "#"}
               onClick={(e) => {
                 if (!canGoNext) e.preventDefault();
               }}
@@ -259,6 +297,7 @@ export default function WineRatePage({
             </p>
           )}
 
+          {/* Wein-Details */}
           {wineTitleLine && (
             <div style={wineInfoStyle}>
               <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>Wein-Details</div>
@@ -287,7 +326,9 @@ export default function WineRatePage({
                   min={c.scaleMin}
                   max={c.scaleMax}
                   value={current}
-                  onChange={(e) => setScores((s) => ({ ...s, [c.id]: Number(e.target.value) }))}
+                  onChange={(e) =>
+                    setScores((s) => ({ ...s, [c.id]: Number(e.target.value) }))
+                  }
                   style={{ width: "100%", marginTop: 10 }}
                 />
               </div>
@@ -323,13 +364,114 @@ export default function WineRatePage({
             </p>
           )}
 
-          <p style={footerStyle}>Tipp: Du kannst direkt mit „Weiter“ zum nächsten Wein springen.</p>
+          <p style={footerStyle}>
+            Tipp: Du kannst direkt mit „Weiter“ zum nächsten Wein springen.
+          </p>
         </div>
       </div>
+
+      {/* ✅ Weiterbewerten Overlay (wenn Not logged in) */}
+      {showResume && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.65)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+            padding: 20,
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 420,
+              background: "rgba(20,20,20,0.92)",
+              border: "1px solid rgba(255,255,255,0.16)",
+              borderRadius: 14,
+              padding: 18,
+              color: "white",
+            }}
+          >
+            <h2 style={{ margin: "0 0 8px 0" }}>Weiterbewerten</h2>
+            <p style={{ margin: "0 0 14px 0", opacity: 0.85, fontSize: 13 }}>
+              Deine Sitzung ist abgelaufen. Bitte bestätige kurz Name + PIN.
+            </p>
+
+            <div style={{ display: "grid", gap: 10 }}>
+              <input
+                value={resumeName}
+                onChange={(e) => setResumeName(e.target.value)}
+                placeholder="Name"
+                style={{
+                  padding: 10,
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  background: "rgba(0,0,0,0.25)",
+                  color: "white",
+                  outline: "none",
+                }}
+              />
+              <input
+                value={resumePin}
+                onChange={(e) => setResumePin(e.target.value)}
+                placeholder="PIN (4-stellig)"
+                inputMode="numeric"
+                style={{
+                  padding: 10,
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  background: "rgba(0,0,0,0.25)",
+                  color: "white",
+                  outline: "none",
+                }}
+              />
+
+              <div style={{ display: "flex", gap: 10 }}>
+                <button
+                  onClick={() => setShowResume(false)}
+                  style={{
+                    flex: 1,
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(255,255,255,0.18)",
+                    background: "rgba(255,255,255,0.10)",
+                    color: "white",
+                    fontWeight: 800,
+                  }}
+                >
+                  Abbrechen
+                </button>
+
+                <button
+                  onClick={resumeSession}
+                  disabled={resumeLoading}
+                  style={{
+                    flex: 1,
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    border: "none",
+                    background: "linear-gradient(135deg, #8e0e00, #c0392b)",
+                    color: "white",
+                    fontWeight: 900,
+                    opacity: resumeLoading ? 0.75 : 1,
+                    cursor: resumeLoading ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {resumeLoading ? "…" : "Weiter"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
+/* Styles (wie Join: Card + Background) */
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
   position: "relative",
