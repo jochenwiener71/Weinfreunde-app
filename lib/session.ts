@@ -1,82 +1,94 @@
 import { cookies } from "next/headers";
 import crypto from "crypto";
 
-const SESSION_COOKIE = "tasting_session";
+const COOKIE_NAME = "tasting_session";
 
 /**
- * Struktur der Session
+ * Session-Payload, die im Cookie gespeichert wird
  */
-export type TastingSession = {
+export type SessionData = {
   tastingId: string;
   participantId: string;
   name: string;
-  iat: number;
-  nonce: string;
 };
 
 /**
- * Erstellt eine neue Teilnehmer-Session (z. B. beim Join oder Weiterbewerten)
+ * 🔐 Session-Cookie setzen
  */
-export function createSession(data: {
-  tastingId: string;
-  participantId: string;
-  name: string;
-}) {
-  const payload: TastingSession = {
+export async function createSession(data: SessionData) {
+  if (!process.env.SESSION_SECRET) {
+    throw new Error("SESSION_SECRET is not set");
+  }
+
+  const payload = JSON.stringify({
     ...data,
     iat: Date.now(),
-    nonce: crypto.randomBytes(16).toString("hex"),
-  };
+  });
 
-  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const secret = process.env.SESSION_SECRET;
+  const signature = crypto
+    .createHmac("sha256", secret)
+    .update(payload)
+    .digest("hex");
+
+  const value = Buffer.from(
+    JSON.stringify({ payload, signature })
+  ).toString("base64");
 
   cookies().set({
-    name: SESSION_COOKIE,
-    value: encoded,
+    name: COOKIE_NAME,
+    value,
     httpOnly: true,
-    sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
     path: "/",
     maxAge: 60 * 60 * 24 * 7, // 7 Tage
   });
 }
 
 /**
- * Liest die Session oder wirft einen Fehler (für API-Routen)
+ * 🔍 Session lesen & validieren
  */
-export function requireSession(): TastingSession {
-  const raw = cookies().get(SESSION_COOKIE)?.value;
-  if (!raw) {
-    throw new Error("Not logged in");
+export function getSession(): SessionData | null {
+  const cookie = cookies().get(COOKIE_NAME);
+  if (!cookie) return null;
+
+  if (!process.env.SESSION_SECRET) {
+    throw new Error("SESSION_SECRET is not set");
   }
 
   try {
-    return JSON.parse(Buffer.from(raw, "base64url").toString());
-  } catch {
-    throw new Error("Invalid session");
-  }
-}
+    const decoded = JSON.parse(
+      Buffer.from(cookie.value, "base64").toString("utf8")
+    );
 
-/**
- * Optional: Session prüfen ohne Error (für UI/Status-Abfragen)
- */
-export function getSession(): TastingSession | null {
-  const raw = cookies().get(SESSION_COOKIE)?.value;
-  if (!raw) return null;
+    const { payload, signature } = decoded;
 
-  try {
-    return JSON.parse(Buffer.from(raw, "base64url").toString());
+    const expectedSignature = crypto
+      .createHmac("sha256", process.env.SESSION_SECRET)
+      .update(payload)
+      .digest("hex");
+
+    if (signature !== expectedSignature) return null;
+
+    const data = JSON.parse(payload);
+
+    return {
+      tastingId: data.tastingId,
+      participantId: data.participantId,
+      name: data.name,
+    };
   } catch {
     return null;
   }
 }
 
 /**
- * Optional: Session löschen (Logout / Reset)
+ * 🚪 Session löschen (Logout / Reset)
  */
 export function clearSession() {
   cookies().set({
-    name: SESSION_COOKIE,
+    name: COOKIE_NAME,
     value: "",
     path: "/",
     maxAge: 0,
