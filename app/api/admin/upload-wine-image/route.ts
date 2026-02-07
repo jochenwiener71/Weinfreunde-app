@@ -33,7 +33,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Only images allowed" }, { status: 400 });
     }
 
-    // 1) resolve tastingId
+    // 1) resolve tasting doc by publicSlug
     const snap = await db()
       .collection("tastings")
       .where("publicSlug", "==", publicSlug)
@@ -42,7 +42,8 @@ export async function POST(req: Request) {
 
     if (snap.empty) return NextResponse.json({ error: "Tasting not found" }, { status: 404 });
 
-    const tastingId = snap.docs[0].id;
+    const tastingDoc = snap.docs[0];
+    const tastingId = tastingDoc.id;
 
     // 2) storage bucket
     const bucketName = String(process.env.FIREBASE_STORAGE_BUCKET ?? "").trim();
@@ -57,7 +58,7 @@ export async function POST(req: Request) {
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
     const originalName = sanitizeFilename((file as any).name || `bottle.${ext}`);
 
-    const imagePath = `tastings/${tastingId}/wines/${wineId}/bottle_${ts}_${originalName}`; // unique
+    const imagePath = `tastings/${tastingId}/wines/${wineId}/bottle_${ts}_${originalName}`;
 
     const arrayBuffer = await blob.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
@@ -78,6 +79,18 @@ export async function POST(req: Request) {
       action: "read",
       expires,
     });
+
+    // ✅ 5) IMPORTANT: persist imageUrl + imagePath in Firestore wine doc
+    const wineRef = tastingDoc.ref.collection("wines").doc(wineId);
+
+    await wineRef.set(
+      {
+        imageUrl,
+        imagePath,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
 
     return NextResponse.json({ ok: true, tastingId, wineId, imageUrl, imagePath });
   } catch (e: any) {
