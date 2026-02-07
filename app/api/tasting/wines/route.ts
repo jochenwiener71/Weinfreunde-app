@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import admin from "firebase-admin";
 import { db } from "@/lib/firebaseAdmin";
 
 type WineSlotPublic = {
@@ -10,10 +11,42 @@ type WineSlotPublic = {
   grape: string | null;
   vintage: string | null;
 
-  // bottle photo
   imageUrl: string | null;
   imagePath: string | null;
 };
+
+function numOrNull(v: any): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function strOrNull(v: any): string | null {
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+/**
+ * Baut eine dauerhaft nutzbare Read-URL aus einem Storage-Pfad.
+ * -> Signed URL (robust, keine Public Rules nötig)
+ */
+async function getReadUrlFromPath(path: string): Promise<string | null> {
+  try {
+    const bucket = admin.storage().bucket(); // nutzt storageBucket aus initializeApp()
+    const file = bucket.file(path);
+
+    const [exists] = await file.exists();
+    if (!exists) return null;
+
+    const [url] = await file.getSignedUrl({
+      action: "read",
+      // sehr weit in der Zukunft -> quasi "permanent" für deine App-Logik
+      expires: "2500-01-01",
+    });
+
+    return url || null;
+  } catch {
+    return null;
+  }
+}
 
 export async function GET(req: Request) {
   try {
@@ -43,32 +76,38 @@ export async function GET(req: Request) {
     const wineCount = typeof t.wineCount === "number" ? t.wineCount : null;
 
     // wines
-    const winesSnap = await db()
-      .collection("tastings")
-      .doc(tastingId)
-      .collection("wines")
-      .get();
+    const winesSnap = await doc.ref.collection("wines").get();
 
-    // ✅ Reporting/Public: Details immer anzeigen (keine Conditionals mehr)
-    const wines: WineSlotPublic[] = winesSnap.docs
+    // NOTE: Details immer sichtbar (wie du wolltest) -> keine reveal-Logik mehr hier.
+    const winesRaw: WineSlotPublic[] = winesSnap.docs
       .map((w) => {
         const wd = w.data() as any;
-
         return {
           id: w.id,
-          blindNumber: typeof wd.blindNumber === "number" ? wd.blindNumber : null,
-          serveOrder: typeof wd.serveOrder === "number" ? wd.serveOrder : null,
+          blindNumber: numOrNull(wd.blindNumber),
+          serveOrder: numOrNull(wd.serveOrder),
 
-          ownerName: typeof wd.ownerName === "string" ? wd.ownerName : null,
-          winery: typeof wd.winery === "string" ? wd.winery : null,
-          grape: typeof wd.grape === "string" ? wd.grape : null,
-          vintage: typeof wd.vintage === "string" ? wd.vintage : null,
+          ownerName: strOrNull(wd.ownerName),
+          winery: strOrNull(wd.winery),
+          grape: strOrNull(wd.grape),
+          vintage: strOrNull(wd.vintage),
 
-          imageUrl: typeof wd.imageUrl === "string" ? wd.imageUrl : null,
-          imagePath: typeof wd.imagePath === "string" ? wd.imagePath : null,
+          imageUrl: strOrNull(wd.imageUrl),
+          imagePath: strOrNull(wd.imagePath),
         };
       })
       .sort((a, b) => (a.blindNumber ?? 999) - (b.blindNumber ?? 999));
+
+    // ✅ backfill imageUrl from imagePath if needed
+    const wines: WineSlotPublic[] = await Promise.all(
+      winesRaw.map(async (w) => {
+        if (w.imageUrl) return w;
+        if (!w.imagePath) return w;
+
+        const url = await getReadUrlFromPath(w.imagePath);
+        return { ...w, imageUrl: url };
+      })
+    );
 
     return NextResponse.json({
       ok: true,
