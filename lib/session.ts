@@ -67,6 +67,34 @@ export async function createSession(data: SessionData) {
   });
 }
 
+/**
+ * ✅ Compatibility export:
+ * Manche Routes importieren "setSessionCookie".
+ * Unterstützt beide Varianten:
+ *  - setSessionCookie({ tastingId, participantId, name })
+ *  - setSessionCookie(tastingId, participantId, name)
+ */
+export async function setSessionCookie(data: SessionData): Promise<void>;
+export async function setSessionCookie(
+  tastingId: string,
+  participantId: string,
+  name: string
+): Promise<void>;
+export async function setSessionCookie(
+  a: SessionData | string,
+  b?: string,
+  c?: string
+) {
+  if (typeof a === "string") {
+    const tastingId = a;
+    const participantId = String(b ?? "").trim();
+    const name = String(c ?? "").trim();
+    await createSession({ tastingId, participantId, name });
+    return;
+  }
+  await createSession(a);
+}
+
 export function clearSession() {
   cookies().set({
     name: COOKIE_NAME,
