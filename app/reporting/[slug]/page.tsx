@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 type SummaryRow = {
   blindNumber: number;
-  perCrit: Record<string, number | null>; // ✅ keys = criterionId
+  perCrit: Record<string, number | null>;
   overall: number | null;
 };
 
@@ -28,8 +28,6 @@ type WineSlotPublic = {
   winery: string | null;
   grape: string | null;
   vintage: string | null;
-
-  // ✅ bottle photo
   imageUrl?: string | null;
   imagePath?: string | null;
 };
@@ -85,15 +83,14 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
     }
   }
 
-  // initial load + auto refresh
   useEffect(() => {
     load();
-    const t = window.setInterval(load, 10_000); // ✅ 10s
+    const t = window.setInterval(load, 10_000);
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
-  // ✅ Vereinfachung: Reporting immer sichtbar
+  // ✅ Reporting IMMER sichtbar
   const revealed = true;
 
   const wineByBlind = useMemo(() => {
@@ -105,24 +102,19 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
   }, [wines]);
 
   const top3 = useMemo(() => {
-    const r = summary?.ranking ?? [];
-    return r.slice(0, 3);
+    return (summary?.ranking ?? []).slice(0, 3);
   }, [summary]);
 
   const allRanking = useMemo(() => {
-    const rows = summary?.ranking ?? [];
-    const base = rows.length ? rows : (summary?.rows ?? []);
-    return base
-      .filter((x) => x && typeof x.blindNumber === "number")
+    const rows = summary?.ranking?.length ? summary.ranking : summary?.rows ?? [];
+    return rows
+      .filter((r) => typeof r.blindNumber === "number")
       .slice()
-      // ✅ null overall immer ans Ende
       .sort((a, b) => {
-        const ao = a.overall;
-        const bo = b.overall;
-        if (ao == null && bo == null) return a.blindNumber - b.blindNumber;
-        if (ao == null) return 1;
-        if (bo == null) return -1;
-        return bo - ao;
+        if (a.overall == null && b.overall == null) return a.blindNumber - b.blindNumber;
+        if (a.overall == null) return 1;
+        if (b.overall == null) return -1;
+        return b.overall - a.overall;
       });
   }, [summary]);
 
@@ -132,7 +124,7 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
 
   return (
     <div style={pageStyle}>
-      {/* background like join */}
+      {/* background */}
       <div
         style={{
           position: "absolute",
@@ -179,10 +171,10 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
           <>
             <section style={cardStyle}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                <div style={{ opacity: 0.9 }}>
-                  Status: <b>{String(summary.status ?? "-")}</b> · Ratings: <b>{summary.ratingCount}</b>
+                <div>
+                  Status: <b>{summary.status ?? "—"}</b> · Ratings: <b>{summary.ratingCount}</b>
                 </div>
-                <div style={{ opacity: 0.75, fontSize: 12 }}>Auto-Refresh: alle 10 Sekunden</div>
+                <div style={{ fontSize: 12, opacity: 0.75 }}>Auto-Refresh: alle 10 Sekunden</div>
               </div>
             </section>
 
@@ -190,40 +182,29 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
             <section style={cardStyle}>
               <h2 style={h2Style}>🏆 Top 3</h2>
 
-              <div style={{ display: "grid", gap: 12 }}>
-                {top3.length === 0 ? (
-                  <p style={{ margin: 0, opacity: 0.85 }}>Noch keine Auswertung verfügbar.</p>
-                ) : (
-                  top3.map((r, idx) => {
+              {top3.length === 0 ? (
+                <p style={{ margin: 0, opacity: 0.85 }}>Noch keine Auswertung verfügbar.</p>
+              ) : (
+                <div style={{ display: "grid", gap: 12 }}>
+                  {top3.map((r, i) => {
                     const w = wineByBlind.get(r.blindNumber);
                     return (
-                      <div key={`${r.blindNumber}-${idx}`} style={topRowStyle}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                          <div style={placeStyle}>{idx + 1}</div>
-
-                          <div>
-                            <div style={{ fontSize: 16, fontWeight: 800 }}>
-                              Wein #{r.blindNumber}
-                              <span style={{ opacity: 0.75, fontWeight: 600 }}>
-                                {" "}
-                                · Score: {typeof r.overall === "number" ? r.overall.toFixed(2) : "—"}
-                              </span>
-                            </div>
-
-                            <div style={{ marginTop: 6, opacity: 0.92, lineHeight: 1.35 }}>
-                              <div>
-                                <b>{w?.winery ?? "—"}</b>
-                                {w?.grape ? ` · ${w.grape}` : ""}
-                                {w?.vintage ? ` · ${w.vintage}` : ""}
-                              </div>
-                              <div style={{ opacity: 0.85 }}>
-                                Mitgebracht von: <b>{w?.ownerName ?? "—"}</b>
-                              </div>
-                            </div>
+                      <div key={r.blindNumber} style={topRowStyle}>
+                        <div>
+                          <div style={{ fontWeight: 800 }}>
+                            #{i + 1} · Wein #{r.blindNumber} ·{" "}
+                            {typeof r.overall === "number" ? r.overall.toFixed(2) : "—"}
+                          </div>
+                          <div style={{ opacity: 0.9 }}>
+                            <b>{w?.winery ?? "—"}</b>
+                            {w?.grape ? ` · ${w.grape}` : ""}
+                            {w?.vintage ? ` · ${w.vintage}` : ""}
+                          </div>
+                          <div style={{ fontSize: 13, opacity: 0.8 }}>
+                            Mitgebracht von: {w?.ownerName ?? "—"}
                           </div>
                         </div>
 
-                        {/* photo */}
                         {w?.imageUrl ? (
                           <img
                             src={w.imageUrl}
@@ -243,12 +224,10 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
                               height: 96,
                               borderRadius: 12,
                               border: "1px solid rgba(255,255,255,0.16)",
-                              background: "rgba(255,255,255,0.06)",
                               display: "flex",
                               alignItems: "center",
                               justifyContent: "center",
-                              fontSize: 12,
-                              opacity: 0.7,
+                              opacity: 0.6,
                             }}
                           >
                             —
@@ -256,12 +235,12 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
                         )}
                       </div>
                     );
-                  })
-                )}
-              </div>
+                  })}
+                </div>
+              )}
             </section>
 
-            {/* RANKING TABLE */}
+            {/* RANKING */}
             <section style={cardStyle}>
               <h2 style={h2Style}>📊 Ranking</h2>
 
@@ -286,24 +265,20 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
                     {allRanking.map((r, i) => {
                       const w = wineByBlind.get(r.blindNumber);
                       return (
-                        <tr key={`${r.blindNumber}-${i}`} style={{ borderTop: "1px solid rgba(255,255,255,0.10)" }}>
+                        <tr key={r.blindNumber} style={{ borderTop: "1px solid rgba(255,255,255,0.1)" }}>
                           <td style={tdStyle}>{i + 1}</td>
-                          <td style={tdStyle}>
-                            <b>#{r.blindNumber}</b>
-                          </td>
+                          <td style={tdStyle}>#{r.blindNumber}</td>
                           <td style={tdStyle}>
                             {typeof r.overall === "number" ? r.overall.toFixed(2) : "—"}
                           </td>
 
-                          {orderedCriteria.map((c) => {
-                            // ✅ FIX: perCrit keys = criterionId (nicht label)
-                            const v = r.perCrit?.[c.id];
-                            return (
-                              <td key={c.id} style={tdStyle}>
-                                {typeof v === "number" ? v.toFixed(2) : "—"}
-                              </td>
-                            );
-                          })}
+                          {orderedCriteria.map((c) => (
+                            <td key={c.id} style={tdStyle}>
+                              {typeof r.perCrit?.[c.id] === "number"
+                                ? r.perCrit[c.id]!.toFixed(2)
+                                : "—"}
+                            </td>
+                          ))}
 
                           <td style={tdStyle}>{w?.ownerName ?? "—"}</td>
                           <td style={tdStyle}>
@@ -318,14 +293,24 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
               </div>
             </section>
 
-            {/* quick links */}
+            {/* LINKS + BEWERTEN */}
             <section style={{ ...cardStyle, display: "flex", gap: 10, flexWrap: "wrap" }}>
               <a href={`/t/${encode(slug)}`} style={linkStyle}>
                 Teilnehmer-Übersicht →
               </a>
+
               <a href={`/join?slug=${encode(slug)}`} style={linkStyle} target="_blank" rel="noreferrer">
                 Join öffnen →
               </a>
+
+              {Array.from({ length: summary.wineCount }).map((_, i) => {
+                const bn = i + 1;
+                return (
+                  <a key={bn} href={`/t/${encode(slug)}/wine/${bn}`} style={linkStyle}>
+                    Wein #{bn} bewerten →
+                  </a>
+                );
+              })}
             </section>
           </>
         )}
@@ -339,7 +324,7 @@ const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
   position: "relative",
   overflow: "hidden",
-  fontFamily: "system-ui, -apple-system, BlinkMacSystemFont",
+  fontFamily: "system-ui",
 };
 
 const wrapStyle: React.CSSProperties = {
@@ -356,8 +341,6 @@ const headerStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
-  gap: 12,
-  flexWrap: "wrap",
   color: "white",
 };
 
@@ -368,20 +351,18 @@ const cardStyle: React.CSSProperties = {
   borderRadius: 16,
   padding: 18,
   color: "white",
-  boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
 };
 
 const h2Style: React.CSSProperties = {
   margin: "0 0 12px 0",
   fontSize: 16,
-  letterSpacing: 0.2,
 };
 
 const btnStyle: React.CSSProperties = {
   padding: "10px 12px",
   borderRadius: 10,
   border: "1px solid rgba(255,255,255,0.18)",
-  background: "rgba(255,255,255,0.10)",
+  background: "rgba(255,255,255,0.1)",
   color: "white",
   fontWeight: 700,
   cursor: "pointer",
@@ -396,9 +377,7 @@ const errorStyle: React.CSSProperties = {
 const codeStyle: React.CSSProperties = {
   padding: "2px 6px",
   borderRadius: 6,
-  background: "rgba(255,255,255,0.10)",
-  border: "1px solid rgba(255,255,255,0.12)",
-  color: "white",
+  background: "rgba(255,255,255,0.1)",
 };
 
 const topRowStyle: React.CSSProperties = {
@@ -412,32 +391,16 @@ const topRowStyle: React.CSSProperties = {
   background: "rgba(255,255,255,0.06)",
 };
 
-const placeStyle: React.CSSProperties = {
-  width: 36,
-  height: 36,
-  borderRadius: 10,
-  background: "rgba(255,255,255,0.12)",
-  border: "1px solid rgba(255,255,255,0.16)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  fontWeight: 900,
-};
-
 const thStyle: React.CSSProperties = {
   textAlign: "left",
   padding: 10,
   fontSize: 12,
-  opacity: 0.85,
   borderBottom: "1px solid rgba(255,255,255,0.14)",
-  whiteSpace: "nowrap",
 };
 
 const tdStyle: React.CSSProperties = {
   padding: 10,
   fontSize: 13,
-  opacity: 0.95,
-  whiteSpace: "nowrap",
 };
 
 const linkStyle: React.CSSProperties = {
@@ -445,7 +408,7 @@ const linkStyle: React.CSSProperties = {
   padding: "10px 12px",
   borderRadius: 10,
   border: "1px solid rgba(255,255,255,0.18)",
-  background: "rgba(255,255,255,0.10)",
+  background: "rgba(255,255,255,0.1)",
   color: "white",
   textDecoration: "none",
   fontWeight: 700,
