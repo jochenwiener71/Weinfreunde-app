@@ -14,11 +14,16 @@ function normPin(v: any) {
   return String(v ?? "").trim();
 }
 
+function normSlug(v: any) {
+  return String(v ?? "").trim();
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({} as any));
 
-    const publicSlug = String(body?.publicSlug ?? "").trim();
+    // ✅ Accept both: publicSlug (preferred) OR slug (legacy/old frontend)
+    const publicSlug = normSlug(body?.publicSlug ?? body?.slug);
     const name = normName(body?.name);
     const pin = normPin(body?.pin);
 
@@ -42,7 +47,6 @@ export async function POST(req: Request) {
 
     // 3) Participant holen oder erzeugen
     const nameLower = name.toLowerCase();
-
     let pId: string | null = null;
 
     // bevorzugt: nameLower Feld
