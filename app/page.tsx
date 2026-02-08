@@ -16,8 +16,15 @@ export default function Home() {
       const res = await fetch("/api/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slug: slug.trim(), pin: pin.trim(), alias: alias.trim() }),
+
+        // 🔧 FIX: alias → name
+        body: JSON.stringify({
+          slug: slug.trim(),
+          pin: pin.trim(),
+          name: alias.trim(),
+        }),
       });
+
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Join failed");
 
