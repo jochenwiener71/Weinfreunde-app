@@ -6,39 +6,27 @@ import { createSession } from "@/lib/session";
 
 export const runtime = "nodejs";
 
+// 🔥 Eindeutige Versionskennung
+const JOIN_ROUTE_VERSION = "join-v7-debug-2026-02-08";
+
 function normName(v: any) {
   return String(v ?? "").trim();
 }
+
 function normPin(v: any) {
   return String(v ?? "").trim();
 }
+
 function normSlug(v: any) {
   return String(v ?? "").trim();
 }
 
 function safeDump(body: any) {
-  // Make a shallow clone and mask secrets so you can paste it safely
   const b: any = body && typeof body === "object" ? { ...body } : body;
 
-  const mask = (obj: any, key: string) => {
-    if (obj && typeof obj === "object" && key in obj) obj[key] = "***";
-  };
-
-  mask(b, "pin");
-  mask(b, "code");
-  mask(b, "passcode");
-
-  // Also try masking nested common spots
-  if (b?.participant) {
-    mask(b.participant, "pin");
-    mask(b.participant, "code");
-    mask(b.participant, "passcode");
-  }
-  if (b?.user) {
-    mask(b.user, "pin");
-    mask(b.user, "code");
-    mask(b.user, "passcode");
-  }
+  if (b?.pin) b.pin = "***";
+  if (b?.code) b.code = "***";
+  if (b?.passcode) b.passcode = "***";
 
   return b;
 }
@@ -47,51 +35,35 @@ export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({} as any));
 
-    // ✅ tolerant field mapping (frontend variations)
     const publicSlug = normSlug(body?.publicSlug ?? body?.slug);
+    const name = normName(body?.name);
+    const pin = normPin(body?.pin);
 
-    // ✅ accept MANY possible name fields, incl. nested objects
-    const name = normName(
-      body?.name ??
-        body?.vorname ??
-        body?.firstName ??
-        body?.firstname ??
-        body?.givenName ??
-        body?.displayName ??
-        body?.userName ??
-        body?.participantName ??
-        body?.participant?.name ??
-        body?.participant?.vorname ??
-        body?.participant?.firstName ??
-        body?.user?.name ??
-        body?.user?.vorname ??
-        body?.profile?.name
-    );
-
-    const pin = normPin(body?.pin ?? body?.code ?? body?.passcode);
-
-    // ✅ DEBUG: return what we actually received (safe masked)
+    // ❌ publicSlug fehlt
     if (!publicSlug) {
       return NextResponse.json(
         {
           ok: false,
           error: "Missing publicSlug",
+          version: JOIN_ROUTE_VERSION,
           receivedKeys: Object.keys(body ?? {}),
           receivedBody: safeDump(body),
         },
-        { status: 400, headers: { "x-debug-join": "1" } }
+        { status: 400 }
       );
     }
 
+    // ❌ NAME fehlt → HIER SIEHST DU DIE VERSION
     if (!name) {
       return NextResponse.json(
         {
           ok: false,
           error: "Missing name",
+          version: JOIN_ROUTE_VERSION,
           receivedKeys: Object.keys(body ?? {}),
           receivedBody: safeDump(body),
         },
-        { status: 400, headers: { "x-debug-join": "1" } }
+        { status: 400 }
       );
     }
 
@@ -100,20 +72,28 @@ export async function POST(req: Request) {
         {
           ok: false,
           error: "Missing pin",
+          version: JOIN_ROUTE_VERSION,
           receivedKeys: Object.keys(body ?? {}),
           receivedBody: safeDump(body),
         },
-        { status: 400, headers: { "x-debug-join": "1" } }
+        { status: 400 }
       );
     }
 
-    // 1) tasting by publicSlug
-    const tq = await db().collection("tastings").where("publicSlug", "==", publicSlug).limit(1).get();
-    if (tq.empty) return NextResponse.json({ ok: false, error: "Tasting not found" }, { status: 404 });
+    // ---- ab hier ist alles OK ----
+
+    const tq = await db()
+      .collection("tastings")
+      .where("publicSlug", "==", publicSlug)
+      .limit(1)
+      .get();
+
+    if (tq.empty) {
+      return NextResponse.json({ ok: false, error: "Tasting not found" }, { status: 404 });
+    }
 
     const tastingDoc = tq.docs[0];
 
-    // 2) PIN prüfen
     const pinRes: any = await verifyPin(tastingDoc.id, pin);
     const pinOk = typeof pinRes === "boolean" ? pinRes : !!pinRes?.ok;
 
@@ -121,15 +101,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Invalid PIN" }, { status: 401 });
     }
 
-    // 3) Participant holen oder erzeugen
     const nameLower = name.toLowerCase();
     let pId: string | null = null;
 
-    const pQ1 = await tastingDoc.ref.collection("participants").where("nameLower", "==", nameLower).limit(1).get();
+    const pQ1 = await tastingDoc.ref
+      .collection("participants")
+      .where("nameLower", "==", nameLower)
+      .limit(1)
+      .get();
+
     if (!pQ1.empty) {
       pId = pQ1.docs[0].id;
     } else {
-      const pQ2 = await tastingDoc.ref.collection("participants").where("name", "==", name).limit(1).get();
+      const pQ2 = await tastingDoc.ref
+        .collection("participants")
+        .where("name", "==", name)
+        .limit(1)
+        .get();
+
       if (!pQ2.empty) {
         pId = pQ2.docs[0].id;
       }
@@ -145,15 +134,22 @@ export async function POST(req: Request) {
       pId = pRef.id;
     }
 
-    // 4) Session cookie setzen
     await createSession({
       tastingId: tastingDoc.id,
       participantId: pId,
       name,
     });
 
-    return NextResponse.json({ ok: true, participantId: pId, name });
+    return NextResponse.json({
+      ok: true,
+      participantId: pId,
+      name,
+      version: JOIN_ROUTE_VERSION,
+    });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? "Join failed" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? "Join failed", version: JOIN_ROUTE_VERSION },
+      { status: 500 }
+    );
   }
 }
