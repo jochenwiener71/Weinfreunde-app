@@ -9,22 +9,38 @@ export const runtime = "nodejs";
 function normName(v: any) {
   return String(v ?? "").trim();
 }
-
 function normPin(v: any) {
   return String(v ?? "").trim();
 }
-
 function normSlug(v: any) {
   return String(v ?? "").trim();
 }
 
-function maskSecrets(obj: any) {
-  const o: any = { ...(obj ?? {}) };
-  // mask common secret fields
-  if (o.pin != null) o.pin = "***";
-  if (o.code != null) o.code = "***";
-  if (o.passcode != null) o.passcode = "***";
-  return o;
+function safeDump(body: any) {
+  // Make a shallow clone and mask secrets so you can paste it safely
+  const b: any = body && typeof body === "object" ? { ...body } : body;
+
+  const mask = (obj: any, key: string) => {
+    if (obj && typeof obj === "object" && key in obj) obj[key] = "***";
+  };
+
+  mask(b, "pin");
+  mask(b, "code");
+  mask(b, "passcode");
+
+  // Also try masking nested common spots
+  if (b?.participant) {
+    mask(b.participant, "pin");
+    mask(b.participant, "code");
+    mask(b.participant, "passcode");
+  }
+  if (b?.user) {
+    mask(b.user, "pin");
+    mask(b.user, "code");
+    mask(b.user, "passcode");
+  }
+
+  return b;
 }
 
 export async function POST(req: Request) {
@@ -54,23 +70,42 @@ export async function POST(req: Request) {
 
     const pin = normPin(body?.pin ?? body?.code ?? body?.passcode);
 
-    if (!publicSlug)
+    // ✅ DEBUG: return what we actually received (safe masked)
+    if (!publicSlug) {
       return NextResponse.json(
-        { ok: false, error: "Missing publicSlug", receivedKeys: Object.keys(body ?? {}), safeBody: maskSecrets(body) },
-        { status: 400 }
+        {
+          ok: false,
+          error: "Missing publicSlug",
+          receivedKeys: Object.keys(body ?? {}),
+          receivedBody: safeDump(body),
+        },
+        { status: 400, headers: { "x-debug-join": "1" } }
       );
+    }
 
-    if (!name)
+    if (!name) {
       return NextResponse.json(
-        { ok: false, error: "Missing name", receivedKeys: Object.keys(body ?? {}), safeBody: maskSecrets(body) },
-        { status: 400 }
+        {
+          ok: false,
+          error: "Missing name",
+          receivedKeys: Object.keys(body ?? {}),
+          receivedBody: safeDump(body),
+        },
+        { status: 400, headers: { "x-debug-join": "1" } }
       );
+    }
 
-    if (!pin)
+    if (!pin) {
       return NextResponse.json(
-        { ok: false, error: "Missing pin", receivedKeys: Object.keys(body ?? {}), safeBody: maskSecrets(body) },
-        { status: 400 }
+        {
+          ok: false,
+          error: "Missing pin",
+          receivedKeys: Object.keys(body ?? {}),
+          receivedBody: safeDump(body),
+        },
+        { status: 400, headers: { "x-debug-join": "1" } }
       );
+    }
 
     // 1) tasting by publicSlug
     const tq = await db().collection("tastings").where("publicSlug", "==", publicSlug).limit(1).get();
