@@ -14,18 +14,22 @@ export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({} as any));
 
-    // ✅ accept old + new field names
+    // ✅ akzeptiere sowohl neue als auch alte Feldnamen
     const publicSlug = s(body?.publicSlug ?? body?.slug);
+
+    // 🔥 HIER ist der Kernfix: alias wird als name akzeptiert
     const name = s(
       body?.name ??
+      body?.alias ??          // ✅ wichtig (dein app/page.tsx sendet alias)
       body?.vorname ??
       body?.firstName ??
       body?.participantName ??
-      body?.userName ??
       body?.displayName ??
+      body?.userName ??
       body?.participant?.name ??
       body?.user?.name
     );
+
     const pin = s(body?.pin ?? body?.code ?? body?.passcode);
 
     if (!publicSlug) return NextResponse.json({ ok: false, error: "Missing publicSlug" }, { status: 400 });
