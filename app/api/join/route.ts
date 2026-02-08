@@ -18,40 +18,63 @@ function normSlug(v: any) {
   return String(v ?? "").trim();
 }
 
+function maskSecrets(obj: any) {
+  const o: any = { ...(obj ?? {}) };
+  // mask common secret fields
+  if (o.pin != null) o.pin = "***";
+  if (o.code != null) o.code = "***";
+  if (o.passcode != null) o.passcode = "***";
+  return o;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({} as any));
 
     // ✅ tolerant field mapping (frontend variations)
     const publicSlug = normSlug(body?.publicSlug ?? body?.slug);
+
+    // ✅ accept MANY possible name fields, incl. nested objects
     const name = normName(
       body?.name ??
-      body?.vorname ??
-      body?.firstName ??
-      body?.participantName
+        body?.vorname ??
+        body?.firstName ??
+        body?.firstname ??
+        body?.givenName ??
+        body?.displayName ??
+        body?.userName ??
+        body?.participantName ??
+        body?.participant?.name ??
+        body?.participant?.vorname ??
+        body?.participant?.firstName ??
+        body?.user?.name ??
+        body?.user?.vorname ??
+        body?.profile?.name
     );
-    const pin = normPin(
-      body?.pin ??
-      body?.code ??
-      body?.passcode
-    );
+
+    const pin = normPin(body?.pin ?? body?.code ?? body?.passcode);
 
     if (!publicSlug)
-      return NextResponse.json({ ok: false, error: "Missing publicSlug" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "Missing publicSlug", receivedKeys: Object.keys(body ?? {}), safeBody: maskSecrets(body) },
+        { status: 400 }
+      );
+
     if (!name)
-      return NextResponse.json({ ok: false, error: "Missing name" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "Missing name", receivedKeys: Object.keys(body ?? {}), safeBody: maskSecrets(body) },
+        { status: 400 }
+      );
+
     if (!pin)
-      return NextResponse.json({ ok: false, error: "Missing pin" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "Missing pin", receivedKeys: Object.keys(body ?? {}), safeBody: maskSecrets(body) },
+        { status: 400 }
+      );
 
     // 1) tasting by publicSlug
-    const tq = await db()
-      .collection("tastings")
-      .where("publicSlug", "==", publicSlug)
-      .limit(1)
-      .get();
-
-    if (tq.empty)
-      return NextResponse.json({ ok: false, error: "Tasting not found" }, { status: 404 });
+    const tq = await db().collection("tastings").where("publicSlug", "==", publicSlug).limit(1).get();
+    if (tq.empty) return NextResponse.json({ ok: false, error: "Tasting not found" }, { status: 404 });
 
     const tastingDoc = tq.docs[0];
 
@@ -67,21 +90,11 @@ export async function POST(req: Request) {
     const nameLower = name.toLowerCase();
     let pId: string | null = null;
 
-    const pQ1 = await tastingDoc.ref
-      .collection("participants")
-      .where("nameLower", "==", nameLower)
-      .limit(1)
-      .get();
-
+    const pQ1 = await tastingDoc.ref.collection("participants").where("nameLower", "==", nameLower).limit(1).get();
     if (!pQ1.empty) {
       pId = pQ1.docs[0].id;
     } else {
-      const pQ2 = await tastingDoc.ref
-        .collection("participants")
-        .where("name", "==", name)
-        .limit(1)
-        .get();
-
+      const pQ2 = await tastingDoc.ref.collection("participants").where("name", "==", name).limit(1).get();
       if (!pQ2.empty) {
         pId = pQ2.docs[0].id;
       }
@@ -106,9 +119,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true, participantId: pId, name });
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message ?? "Join failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: e?.message ?? "Join failed" }, { status: 500 });
   }
 }
