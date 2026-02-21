@@ -11,22 +11,34 @@ export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
 
-    const slug = String(body.slug ?? "").trim().toLowerCase();
+    const rawSlug = String(body.slug ?? "").trim();
     const name = String(body.name ?? "").trim();
     const pin = String(body.pin ?? "").trim();
 
-    if (!slug || !name || !pin) {
+    if (!rawSlug || !name || !pin) {
       return NextResponse.json(
         { ok: false, error: "Missing slug/name/pin" },
         { status: 400 }
       );
     }
 
-    const tq = await db()
+    // 🔒 Slug robust behandeln (Case-safe)
+    const slugLower = rawSlug.toLowerCase();
+
+    let tq = await db()
       .collection("tastings")
-      .where("publicSlug", "==", slug)
+      .where("publicSlug", "==", rawSlug)
       .limit(1)
       .get();
+
+    // Fallback falls DB lowercase speichert
+    if (tq.empty && slugLower !== rawSlug) {
+      tq = await db()
+        .collection("tastings")
+        .where("publicSlug", "==", slugLower)
+        .limit(1)
+        .get();
+    }
 
     if (tq.empty) {
       return NextResponse.json(
@@ -37,6 +49,7 @@ export async function POST(req: Request) {
 
     const tastingDoc = tq.docs[0];
 
+    // Teilnehmer suchen
     const pq = await tastingDoc.ref
       .collection("participants")
       .where("name", "==", name)
@@ -53,6 +66,7 @@ export async function POST(req: Request) {
     const participantDoc = pq.docs[0];
     const p = participantDoc.data() as any;
 
+    // PIN prüfen (hash)
     if (!verifyPin(pin, p.pinHash)) {
       return NextResponse.json(
         { ok: false, error: "PIN falsch" },
@@ -60,13 +74,14 @@ export async function POST(req: Request) {
       );
     }
 
+    // Session setzen
     const res = NextResponse.json({ ok: true });
 
     setSessionCookie(res, {
       participantId: participantDoc.id,
       participantName: p.name,
       tastingId: tastingDoc.id,
-      publicSlug: slug,
+      publicSlug: (tastingDoc.data() as any).publicSlug,
     });
 
     return res;
