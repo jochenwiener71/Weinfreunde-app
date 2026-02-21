@@ -7,7 +7,7 @@ type CheckResp =
   | { ok: true; session: any }
   | { ok: false; error?: string };
 
-export default function TastingEntryPage() {
+export default function TastingSlugLandingPage() {
   const router = useRouter();
   const params = useParams<{ slug: string }>();
 
@@ -16,6 +16,7 @@ export default function TastingEntryPage() {
   const [checking, setChecking] = useState(true);
   const [loggedIn, setLoggedIn] = useState(false);
 
+  // Overlay state
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
@@ -75,43 +76,49 @@ export default function TastingEntryPage() {
       });
 
       const data = await res.json().catch(() => ({}));
-
       if (!res.ok || !data?.ok) {
         setError(String(data?.error ?? "Login failed"));
-        setSubmitting(false);
         return;
       }
 
-      // ✅ Direkt sauber weiterleiten (kein Reload, kein Doppel-Check)
-      window.location.href = `/t/${slug}/summary`;
+      // ✅ Cookie gesetzt -> Session neu prüfen und dann weiter
+      await checkSession();
+
+      // Direkt zur Bewertung (Wein #1)
+      window.location.href = `/t/${encodeURIComponent(slug)}/wine/1`;
     } catch (e: any) {
       setError(e?.message ?? "Login failed");
+    } finally {
       setSubmitting(false);
     }
   }
 
+  // Wenn eingeloggt: direkt zu Wein #1
   useEffect(() => {
     if (checking) return;
     if (!loggedIn) return;
 
-    router.replace(`/t/${slug}/summary`);
+    router.replace(`/t/${encodeURIComponent(slug)}/wine/1`);
   }, [checking, loggedIn, router, slug]);
 
   return (
     <main className="min-h-[100svh] w-full flex items-center justify-center px-4 py-10">
       <div className="w-full max-w-xl">
         <div className="rounded-2xl border border-white/10 bg-black/40 backdrop-blur-xl p-6 shadow-2xl">
-          <div className="text-white/90 text-lg font-semibold">🍷 {slug || "Tasting"}</div>
+          <div className="text-white/90 text-lg font-semibold">
+            🍷 {slug || "Tasting"}
+          </div>
           <div className="mt-2 text-white/60 text-sm">
             {checking
               ? "Session wird geprüft …"
               : loggedIn
-              ? "Eingeloggt – leite weiter …"
+              ? "Eingeloggt – leite zur Bewertung …"
               : "Nicht eingeloggt – bitte Name + PIN eingeben."}
           </div>
         </div>
       </div>
 
+      {/* Login Overlay */}
       {overlayOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
           <div className="absolute inset-0 bg-black/60" />
@@ -119,9 +126,8 @@ export default function TastingEntryPage() {
           <div className="relative w-full max-w-md rounded-2xl border border-white/10 bg-black/70 backdrop-blur-xl p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-white text-xl font-semibold">Weiterbewerten</div>
+                <div className="text-white text-xl font-semibold">Einloggen</div>
                 <div className="mt-1 text-white/60 text-sm">
-                  Du bist nicht eingeloggt (anderes Gerät / Cookies gelöscht).
                   Bitte gib deinen Namen und die 4-stellige PIN ein.
                 </div>
               </div>
@@ -137,7 +143,9 @@ export default function TastingEntryPage() {
 
             <div className="mt-5 space-y-3">
               <div>
-                <label className="block text-white/70 text-sm mb-1">Runde (Slug)</label>
+                <label className="block text-white/70 text-sm mb-1">
+                  Runde (Slug)
+                </label>
                 <input
                   value={slug}
                   readOnly
@@ -146,7 +154,9 @@ export default function TastingEntryPage() {
               </div>
 
               <div>
-                <label className="block text-white/70 text-sm mb-1">Dein Vorname</label>
+                <label className="block text-white/70 text-sm mb-1">
+                  Dein Vorname
+                </label>
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -157,13 +167,14 @@ export default function TastingEntryPage() {
               </div>
 
               <div>
-                <label className="block text-white/70 text-sm mb-1">PIN (4-stellig)</label>
+                <label className="block text-white/70 text-sm mb-1">
+                  PIN (4-stellig)
+                </label>
                 <input
                   value={pin}
-                  onChange={(e) =>
-                    setPin(e.target.value.replace(/\D/g, "").slice(0, 4))
-                  }
+                  onChange={(e) => setPin(e.target.value)}
                   inputMode="numeric"
+                  pattern="[0-9]*"
                   placeholder="1234"
                   className="w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 text-white outline-none focus:border-white/30"
                 />
@@ -178,12 +189,9 @@ export default function TastingEntryPage() {
               <button
                 onClick={submitJoin}
                 disabled={
-                  submitting ||
-                  !slug ||
-                  name.trim().length < 1 ||
-                  pin.trim().length !== 4
+                  submitting || !slug || name.trim().length < 1 || pin.trim().length < 4
                 }
-                className="mt-2 w-full rounded-xl bg-red-600/90 hover:bg-red-600 disabled:opacity-50 text-white font-semibold py-3 transition"
+                className="mt-2 w-full rounded-xl bg-red-600/90 hover:bg-red-600 disabled:opacity-50 disabled:hover:bg-red-600/90 text-white font-semibold py-3 transition"
               >
                 {submitting ? "Bitte warten …" : "Beitreten"}
               </button>
