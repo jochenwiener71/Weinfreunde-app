@@ -1,56 +1,53 @@
-export const dynamic = "force-dynamic";
+import crypto from "crypto";
 
-type Summary = {
-  ok: boolean;
-  publicSlug: string;
-  tastingId: string;
-  status: "draft" | "open" | "closed" | "revealed" | string;
-  wineCount: number;
-  criteria: { id: string; label: string; order?: number }[];
-  rows?: { blindNumber: number; perCrit: Record<string, number | null>; overall: number | null }[];
-  ranking?: { blindNumber: number; perCrit: Record<string, number | null>; overall: number | null }[];
-  ratingCount?: number;
-  message?: string;
-  error?: string;
-};
-
-function fmt(n: number | null | undefined) {
-  if (n === null || n === undefined) return "—";
-  return n.toFixed(2);
+/**
+ * Hash a 4-digit PIN using server-side salt
+ */
+export function hashPin(pin: string): string {
+  const salt = process.env.PIN_SALT ?? "";
+  return crypto
+    .createHash("sha256")
+    .update(`${pin}:${salt}`)
+    .digest("hex");
 }
 
-export default async function ResultsPage({ params }: { params: { slug: string } }) {
-  const slug = (params.slug ?? "").trim();
+/**
+ * Verify a plain PIN against a stored hash
+ */
+export function verifyPin(pin: string, storedHash: string): boolean {
+  if (!pin || !storedHash) return false;
+  const computed = hashPin(pin);
+  return crypto.timingSafeEqual(
+    Buffer.from(computed, "utf8"),
+    Buffer.from(storedHash, "utf8")
+  );
+}
 
-  const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/api/tasting/summary?publicSlug=${encodeURIComponent(slug)}`, {
-    cache: "no-store",
-  }).catch(() => null);
-
-  // If NEXT_PUBLIC_BASE_URL is not set, fall back to relative fetch (works on Vercel)
-  const data: Summary =
-    res
-      ? await res.json().catch(() => ({ ok: false, error: "Invalid JSON from API" } as any))
-      : await fetch(`/api/tasting/summary?publicSlug=${encodeURIComponent(slug)}`, { cache: "no-store" })
-          .then((r) => r.json())
-          .catch(() => ({ ok: false, error: "Fetch failed" } as any));
-
-  if (!data?.ok) {
-    return (
-      <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 980 }}>
-        <h1>Ergebnisse</h1>
-        <p style={{ color: "crimson" }}>
-          {data?.error ?? "Konnte Summary nicht laden."}
-        </p>
-      </main>
-    );
+/**
+ * Require ADMIN_SECRET (throws on failure)
+ */
+export function requireAdminSecret(req: Request) {
+  const expected = String(process.env.ADMIN_SECRET ?? "").trim();
+  if (!expected) {
+    throw new Error("ADMIN_SECRET not configured");
   }
 
-  const criteria = data.criteria ?? [];
-  const rows = data.rows ?? [];
-  const ranking = data.ranking ?? [];
+  const header =
+    req.headers.get("x-admin-secret") ||
+    req.headers.get("X-Admin-Secret") ||
+    "";
 
-  return (
-    <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 980 }}>
+  const auth = req.headers.get("authorization") || "";
+  let provided = header;
+
+  if (!provided && auth.toLowerCase().startsWith("bearer ")) {
+    provided = auth.slice(7).trim();
+  }
+
+  if (!provided || provided !== expected) {
+    throw new Error("Forbidden");
+  }
+}
       <header style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
           <h1 style={{ marginBottom: 6 }}>Ergebnisse · {data.publicSlug}</h1>
