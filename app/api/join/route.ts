@@ -1,93 +1,79 @@
-// lib/security.ts
-import crypto from "crypto";
+// app/api/join/route.ts
 
-/**
- * Hash a 4-digit PIN using server-side salt
- * Output: sha256 hex (64 chars)
- */
-export function hashPin(pin: string): string {
-  const salt = process.env.PIN_SALT ?? "";
-  return crypto
-    .createHash("sha256")
-    .update(`${pin}:${salt}`)
-    .digest("hex");
-}
+import { NextResponse } from "next/server";
+import { db } from "@/lib/firebaseAdmin";
+import { setSessionCookie } from "@/lib/session";
+import { verifyPin } from "@/lib/security";
 
-/**
- * Verify a plain PIN against a stored hash (hex)
- * ✅ Uses timingSafeEqual with equal-length buffers
- * ✅ Decodes hex correctly (NOT utf8)
- */
-export function verifyPin(pin: string, storedHash: string): boolean {
-  if (!pin || !storedHash) return false;
+export const runtime = "nodejs";
 
-  const computedHex = hashPin(String(pin).trim());
-
-  // sha256 hex should be 64 chars; but we just enforce equality
-  if (computedHex.length !== String(storedHash).length) return false;
-
+export async function POST(req: Request) {
   try {
-    const a = Buffer.from(computedHex, "hex");
-    const b = Buffer.from(String(storedHash), "hex");
-    if (a.length !== b.length) return false;
-    return crypto.timingSafeEqual(a, b);
-  } catch {
-    return false;
-  }
-}
+    const body = await req.json().catch(() => ({}));
 
-/**
- * Constant-time compare for secrets (string)
- * ✅ Avoids "Input buffers must have the same byte length"
- */
-function safeEqualString(a: string, b: string): boolean {
-  const aa = Buffer.from(a, "utf8");
-  const bb = Buffer.from(b, "utf8");
-  if (aa.length !== bb.length) return false;
-  return crypto.timingSafeEqual(aa, bb);
-}
+    const slug = String(body.slug ?? "").trim().toLowerCase();
+    const name = String(body.name ?? "").trim();
+    const pin = String(body.pin ?? "").trim();
 
-/**
- * Require ADMIN_SECRET (throws on failure)
- * Reads x-admin-secret (or Authorization: Bearer <secret>)
- */
-export function requireAdminSecret(req: Request) {
-  const expected = String(process.env.ADMIN_SECRET ?? "").trim();
-  if (!expected) throw new Error("ADMIN_SECRET not configured");
+    if (!slug || !name || !pin) {
+      return NextResponse.json(
+        { ok: false, error: "Missing slug/name/pin" },
+        { status: 400 }
+      );
+    }
 
-  const header =
-    req.headers.get("x-admin-secret") ||
-    req.headers.get("X-Admin-Secret") ||
-    "";
+    const tq = await db()
+      .collection("tastings")
+      .where("publicSlug", "==", slug)
+      .limit(1)
+      .get();
 
-  const auth = req.headers.get("authorization") || "";
-  let provided = String(header ?? "").trim();
+    if (tq.empty) {
+      return NextResponse.json(
+        { ok: false, error: "Tasting not found" },
+        { status: 404 }
+      );
+    }
 
-  // Allow: Authorization: Bearer <secret>
-  if (!provided && auth.toLowerCase().startsWith("bearer ")) {
-    provided = auth.slice(7).trim();
-  }
+    const tastingDoc = tq.docs[0];
 
-  if (!provided) throw new Error("Missing admin secret");
+    const pq = await tastingDoc.ref
+      .collection("participants")
+      .where("name", "==", name)
+      .limit(1)
+      .get();
 
-  // ✅ constant-time compare + length safe
-  if (!safeEqualString(provided, expected)) {
-    throw new Error("Invalid admin secret");
-  }
-}
-  const header =
-    req.headers.get("x-admin-secret") ||
-    req.headers.get("X-Admin-Secret") ||
-    "";
+    if (pq.empty) {
+      return NextResponse.json(
+        { ok: false, error: "Teilnehmer nicht gefunden" },
+        { status: 401 }
+      );
+    }
 
-  const auth = req.headers.get("authorization") || "";
-  let provided = header;
+    const participantDoc = pq.docs[0];
+    const p = participantDoc.data() as any;
 
-  if (!provided && auth.toLowerCase().startsWith("bearer ")) {
-    provided = auth.slice(7).trim();
-  }
+    if (!verifyPin(pin, p.pinHash)) {
+      return NextResponse.json(
+        { ok: false, error: "PIN falsch" },
+        { status: 401 }
+      );
+    }
 
-  if (!provided || provided !== expected) {
-    throw new Error("Forbidden");
+    const res = NextResponse.json({ ok: true });
+
+    setSessionCookie(res, {
+      participantId: participantDoc.id,
+      participantName: p.name,
+      tastingId: tastingDoc.id,
+      publicSlug: slug,
+    });
+
+    return res;
+  } catch (e: any) {
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? "Join failed" },
+      { status: 500 }
+    );
   }
 }
