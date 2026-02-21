@@ -1,175 +1,98 @@
 // lib/session.ts
 import { cookies } from "next/headers";
 import crypto from "crypto";
+import type { NextResponse } from "next/server";
 
+export const runtime = "nodejs";
+
+const COOKIE_NAME = "wf_session";
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 Tage
+
+// ✅ Session-Shape (hier kommt dein publicSlug rein)
 export type SessionData = {
   tastingId: string;
   participantId: string;
-  name: string;
+  participantName: string;
+  publicSlug?: string; // ✅ NEU
 };
 
-const COOKIE_NAME = "wf_session";
-
-// ---------- helpers ----------
-function getSecret() {
-  const s = String(process.env.SESSION_SECRET ?? "").trim();
-  if (!s) throw new Error("Server misconfigured: SESSION_SECRET is not set.");
-  return s;
+function requireSessionSecret() {
+  const secret = (process.env.SESSION_SECRET ?? "").trim();
+  if (!secret || secret.length < 32) {
+    throw new Error("SESSION_SECRET is not set or too short (min 32 chars).");
+  }
+  return secret;
 }
 
-function base64urlEncode(buf: Buffer) {
-  return buf
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
+function sign(payloadB64: string) {
+  const secret = requireSessionSecret();
+  return crypto.createHmac("sha256", secret).update(payloadB64).digest("base64url");
 }
 
-function base64urlDecode(s: string) {
-  const pad = 4 - (s.length % 4 || 4);
-  const b64 = s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat(pad);
-  return Buffer.from(b64, "base64");
+function encode(data: SessionData) {
+  const json = JSON.stringify(data);
+  const payloadB64 = Buffer.from(json, "utf8").toString("base64url");
+  const sig = sign(payloadB64);
+  return `${payloadB64}.${sig}`;
 }
 
-function sign(payloadJson: string) {
-  const secret = getSecret();
-  const sig = crypto.createHmac("sha256", secret).update(payloadJson).digest();
-  return base64urlEncode(sig);
-}
+function decode(value: string): SessionData | null {
+  const [payloadB64, sig] = String(value ?? "").split(".");
+  if (!payloadB64 || !sig) return null;
 
-function safeJsonParse<T>(s: string): T | null {
+  const expected = sign(payloadB64);
+
+  // timing safe compare => gleiche byte length!
+  const a = Buffer.from(sig, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  if (a.length !== b.length) return null;
+  if (!crypto.timingSafeEqual(a, b)) return null;
+
   try {
-    return JSON.parse(s) as T;
+    const json = Buffer.from(payloadB64, "base64url").toString("utf8");
+    const data = JSON.parse(json);
+
+    if (!data?.tastingId || !data?.participantId || !data?.participantName) return null;
+
+    // ✅ publicSlug ist optional, daher kein Muss
+    return data as SessionData;
   } catch {
     return null;
   }
 }
 
-function makeToken(data: SessionData) {
-  const payload = { ...data, iat: Date.now() };
-  const payloadJson = JSON.stringify(payload);
-  return `${base64urlEncode(Buffer.from(payloadJson, "utf8"))}.${sign(payloadJson)}`;
-}
+// ✅ Set cookie on a NextResponse
+export function setSessionCookie(res: NextResponse, data: SessionData) {
+  const value = encode(data);
 
-function setCookieOn(target: any, token: string) {
-  // If we have a NextResponse-like object with res.cookies.set(...)
-  if (target && typeof target === "object" && target.cookies && typeof target.cookies.set === "function") {
-    target.cookies.set({
-      name: COOKIE_NAME,
-      value: token,
-      httpOnly: true,
-      secure: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 30,
-    });
-    return;
-  }
-
-  // Fallback: set cookie via next/headers cookies()
-  cookies().set({
+  res.cookies.set({
     name: COOKIE_NAME,
-    value: token,
+    value,
     httpOnly: true,
-    secure: true,
     sameSite: "lax",
+    secure: true,
     path: "/",
-    maxAge: 60 * 60 * 24 * 30,
+    maxAge: COOKIE_MAX_AGE,
   });
 }
 
-// ---------- API ----------
-export async function createSession(data: SessionData) {
-  const token = makeToken(data);
-  setCookieOn(null, token);
-}
-
-/**
- * ✅ Compatibility export: setSessionCookie
- *
- * Unterstützt ALLE Varianten, die bei dir im Projekt vorkommen:
- * 1) setSessionCookie({ tastingId, participantId, name })
- * 2) setSessionCookie(tastingId, participantId, name)
- * 3) setSessionCookie(res, { tastingId, participantId, participantName | name })
- */
-export async function setSessionCookie(data: SessionData): Promise<void>;
-export async function setSessionCookie(tastingId: string, participantId: string, name: string): Promise<void>;
-export async function setSessionCookie(
-  res: any,
-  data: { tastingId: string; participantId: string; participantName?: string; name?: string }
-): Promise<void>;
-export async function setSessionCookie(a: any, b?: any, c?: any) {
-  // 3 args: (tastingId, participantId, name)
-  if (typeof a === "string") {
-    const tastingId = String(a).trim();
-    const participantId = String(b ?? "").trim();
-    const name = String(c ?? "").trim();
-    const token = makeToken({ tastingId, participantId, name });
-    setCookieOn(null, token);
-    return;
-  }
-
-  // 2 args: (res, payload)
-  if (a && b && typeof b === "object") {
-    const tastingId = String(b.tastingId ?? "").trim();
-    const participantId = String(b.participantId ?? "").trim();
-    const name = String(b.participantName ?? b.name ?? "").trim();
-    const token = makeToken({ tastingId, participantId, name });
-    setCookieOn(a, token);
-    return;
-  }
-
-  // 1 arg: ({ tastingId, participantId, name })
-  if (a && typeof a === "object") {
-    const tastingId = String(a.tastingId ?? "").trim();
-    const participantId = String(a.participantId ?? "").trim();
-    const name = String(a.name ?? "").trim();
-    const token = makeToken({ tastingId, participantId, name });
-    setCookieOn(null, token);
-    return;
-  }
-
-  throw new Error("Invalid setSessionCookie call");
-}
-
-export function clearSession() {
-  cookies().set({
+export function clearSessionCookie(res: NextResponse) {
+  res.cookies.set({
     name: COOKIE_NAME,
     value: "",
     httpOnly: true,
-    secure: true,
     sameSite: "lax",
+    secure: true,
     path: "/",
     maxAge: 0,
   });
 }
 
+// ✅ Read session in Server Components / Route Handlers
 export function getSession(): SessionData | null {
   const c = cookies().get(COOKIE_NAME)?.value;
   if (!c) return null;
-
-  const [payloadB64, sig] = c.split(".");
-  if (!payloadB64 || !sig) return null;
-
-  const payloadJson = base64urlDecode(payloadB64).toString("utf8");
-  const expected = sign(payloadJson);
-
-  // Timing-safe compare
-  const a = Buffer.from(sig);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return null;
-  if (!crypto.timingSafeEqual(a, b)) return null;
-
-  const parsed = safeJsonParse<any>(payloadJson);
-  if (!parsed) return null;
-
-  const tastingId = String(parsed.tastingId ?? "").trim();
-  const participantId = String(parsed.participantId ?? "").trim();
-  const name = String(parsed.name ?? "").trim();
-
-  if (!tastingId || !participantId || !name) return null;
-
-  return { tastingId, participantId, name };
+  return decode(c);
 }
 
 export function requireSession(): SessionData {
