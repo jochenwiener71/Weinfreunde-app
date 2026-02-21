@@ -16,7 +16,6 @@ export default function TastingEntryPage() {
   const [checking, setChecking] = useState(true);
   const [loggedIn, setLoggedIn] = useState(false);
 
-  // Overlay state
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
@@ -76,40 +75,30 @@ export default function TastingEntryPage() {
       });
 
       const data = await res.json().catch(() => ({}));
+
       if (!res.ok || !data?.ok) {
         setError(String(data?.error ?? "Login failed"));
+        setSubmitting(false);
         return;
       }
 
-      // ✅ Cookie gesetzt -> jetzt Session prüfen + weiter
-      await checkSession();
-
-      // Falls du danach direkt auf eine Unterseite willst, z.B. summary:
-      // router.push(`/t/${slug}/summary`);
-      // Hier: einfach reload damit alles serverseitig korrekt lädt
-      window.location.reload();
+      // ✅ Direkt sauber weiterleiten (kein Reload, kein Doppel-Check)
+      window.location.href = `/t/${slug}/summary`;
     } catch (e: any) {
       setError(e?.message ?? "Login failed");
-    } finally {
       setSubmitting(false);
     }
   }
 
-  // Wenn eingeloggt: weiter in deine bestehende Tasting-UI
-  // 👉 Hier leitest du in deine echte Seite weiter (Summary / Overview / etc.)
   useEffect(() => {
     if (checking) return;
     if (!loggedIn) return;
 
-    // Passe das Ziel an DEINEN Flow an:
-    // - wenn du eine Übersicht hast: /t/[slug]/summary
-    // - oder wenn direkt Bewertung: /t/[slug]/wine/1
     router.replace(`/t/${slug}/summary`);
   }, [checking, loggedIn, router, slug]);
 
   return (
     <main className="min-h-[100svh] w-full flex items-center justify-center px-4 py-10">
-      {/* Hintergrund / Platzhalter (falls deine echte Seite hier nicht gerendert wird) */}
       <div className="w-full max-w-xl">
         <div className="rounded-2xl border border-white/10 bg-black/40 backdrop-blur-xl p-6 shadow-2xl">
           <div className="text-white/90 text-lg font-semibold">🍷 {slug || "Tasting"}</div>
@@ -123,7 +112,6 @@ export default function TastingEntryPage() {
         </div>
       </div>
 
-      {/* ✅ Weiterbewerten Overlay */}
       {overlayOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
           <div className="absolute inset-0 bg-black/60" />
@@ -172,9 +160,10 @@ export default function TastingEntryPage() {
                 <label className="block text-white/70 text-sm mb-1">PIN (4-stellig)</label>
                 <input
                   value={pin}
-                  onChange={(e) => setPin(e.target.value)}
+                  onChange={(e) =>
+                    setPin(e.target.value.replace(/\D/g, "").slice(0, 4))
+                  }
                   inputMode="numeric"
-                  pattern="[0-9]*"
                   placeholder="1234"
                   className="w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 text-white outline-none focus:border-white/30"
                 />
@@ -188,8 +177,13 @@ export default function TastingEntryPage() {
 
               <button
                 onClick={submitJoin}
-                disabled={submitting || !slug || name.trim().length < 1 || pin.trim().length < 4}
-                className="mt-2 w-full rounded-xl bg-red-600/90 hover:bg-red-600 disabled:opacity-50 disabled:hover:bg-red-600/90 text-white font-semibold py-3 transition"
+                disabled={
+                  submitting ||
+                  !slug ||
+                  name.trim().length < 1 ||
+                  pin.trim().length !== 4
+                }
+                className="mt-2 w-full rounded-xl bg-red-600/90 hover:bg-red-600 disabled:opacity-50 text-white font-semibold py-3 transition"
               >
                 {submitting ? "Bitte warten …" : "Beitreten"}
               </button>
