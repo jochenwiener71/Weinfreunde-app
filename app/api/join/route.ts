@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
-import { db } from "@/lib/firebase-admin";
+import { db } from "@/lib/firebaseAdmin";
 
 type JoinBody = {
   slug: string;
@@ -8,8 +8,13 @@ type JoinBody = {
   pin: string;
 };
 
-function verifyPin(pin: string, storedHash: string) {
+function verifyPin(pin: string, storedHashRaw: string) {
   const salt = process.env.PIN_SALT ?? "";
+
+  const storedHash = String(storedHashRaw ?? "").trim().toLowerCase();
+
+  // Guard: storedHash muss ein gültiger SHA256 Hex-String sein (64 chars)
+  if (!/^[0-9a-f]{64}$/.test(storedHash)) return false;
 
   const computed = crypto
     .createHash("sha256")
@@ -19,6 +24,7 @@ function verifyPin(pin: string, storedHash: string) {
   const a = Buffer.from(computed, "hex");
   const b = Buffer.from(storedHash, "hex");
 
+  // Muss gleich lang sein, sonst timingSafeEqual wirft
   if (a.length !== b.length) return false;
 
   return crypto.timingSafeEqual(a, b);
@@ -26,43 +32,46 @@ function verifyPin(pin: string, storedHash: string) {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as JoinBody;
+    const body = (await req.json()) as Partial<JoinBody>;
 
-    if (!body?.slug || !body?.name || !body?.pin) {
+    const slugRaw = String(body?.slug ?? "").trim();
+    const nameRaw = String(body?.name ?? "").trim();
+    const pinRaw = String(body?.pin ?? "").trim();
+
+    if (!slugRaw || !nameRaw || !pinRaw) {
       return NextResponse.json(
         { ok: false, error: "Missing slug/name/pin" },
         { status: 400 }
       );
     }
 
-    const slug = body.slug.trim().toLowerCase();
-    const name = body.name.trim();
-    const pin = body.pin.trim();
+    const slug = slugRaw.toLowerCase();
+    const name = nameRaw;
+    const pin = pinRaw;
 
-    if (pin.length !== 4) {
+    if (!/^\d{4}$/.test(pin)) {
       return NextResponse.json(
         { ok: false, error: "Invalid PIN format" },
         { status: 400 }
       );
     }
 
-    // 🔎 1. Versuche über publicSlug
+    // 🔎 1) Suche über publicSlug
     const query = await db()
       .collection("tastings")
       .where("publicSlug", "==", slug)
       .limit(1)
       .get();
 
-    let tastingDoc = null;
+    let tastingDoc: FirebaseFirestore.QueryDocumentSnapshot | FirebaseFirestore.DocumentSnapshot | null =
+      null;
 
     if (!query.empty) {
       tastingDoc = query.docs[0];
     } else {
-      // 🔎 2. Fallback: slug als DocId
+      // 🔎 2) Fallback: slug als DocId
       const doc = await db().collection("tastings").doc(slug).get();
-      if (doc.exists) {
-        tastingDoc = doc;
-      }
+      if (doc.exists) tastingDoc = doc;
     }
 
     if (!tastingDoc) {
@@ -72,7 +81,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const tastingData = tastingDoc.data();
+    const tastingData = tastingDoc.data() as any;
 
     if (!tastingData?.pinHash) {
       return NextResponse.json(
@@ -90,7 +99,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 🍷 Participant anlegen
+    // 👤 Participant anlegen
     const participantRef = await db()
       .collection("tastings")
       .doc(tastingDoc.id)
@@ -114,6 +123,7 @@ export async function POST(req: NextRequest) {
         httpOnly: true,
         sameSite: "lax",
         path: "/",
+        secure: process.env.NODE_ENV === "production",
       }
     );
 
