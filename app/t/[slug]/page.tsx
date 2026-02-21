@@ -81,7 +81,7 @@ export default function TastingSlugLandingPage() {
         return;
       }
 
-      // ✅ Cookie gesetzt -> Session neu prüfen und dann weiter
+      // Cookie gesetzt -> Session neu prüfen und dann weiter
       await checkSession();
 
       // Direkt zur Bewertung (Wein #1)
@@ -102,86 +102,174 @@ export default function TastingSlugLandingPage() {
   }, [checking, loggedIn, router, slug]);
 
   return (
-    <main className="min-h-[100svh] w-full flex items-center justify-center px-4 py-10">
-      <div className="w-full max-w-xl">
-        <div className="rounded-2xl border border-white/10 bg-black/40 backdrop-blur-xl p-6 shadow-2xl">
-          <div className="text-white/90 text-lg font-semibold">
-            🍷 {slug || "Tasting"}
+    <div style={pageStyle}>
+      {/* Background wie Bewertung */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage: "url('/join-bg.jpg')",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          filter: "blur(2px)",
+          transform: "scale(1.05)",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background:
+            "linear-gradient(180deg, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.78) 60%, rgba(0,0,0,0.9) 100%)",
+        }}
+      />
+
+      <div style={centerWrapStyle}>
+        <div style={cardStyle}>
+          <h1 style={h1Style}>Weinprobe</h1>
+          <p style={subStyle}>
+            {slug ? (
+              <>
+                Runde: <b>{slug}</b>
+              </>
+            ) : (
+              "Runde wird geladen …"
+            )}
+          </p>
+
+          <div style={infoBoxStyle}>
+            <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>
+              Status
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 750, lineHeight: 1.35 }}>
+              {checking
+                ? "Session wird geprüft …"
+                : loggedIn
+                ? "Eingeloggt – leite zur Bewertung weiter …"
+                : "Nicht eingeloggt – bitte Name + PIN eingeben."}
+            </div>
           </div>
-          <div className="mt-2 text-white/60 text-sm">
-            {checking
-              ? "Session wird geprüft …"
-              : loggedIn
-              ? "Eingeloggt – leite zur Bewertung …"
-              : "Nicht eingeloggt – bitte Name + PIN eingeben."}
-          </div>
+
+          {!loggedIn && (
+            <button
+              onClick={() => setOverlayOpen(true)}
+              style={{
+                ...primaryBtnStyle,
+                opacity: !slug ? 0.6 : 1,
+                cursor: !slug ? "not-allowed" : "pointer",
+              }}
+              disabled={!slug}
+            >
+              Einloggen
+            </button>
+          )}
+
+          <p style={footerStyle}>
+            Tipp: Wenn du über den QR-Code kommst, bist du direkt in der richtigen Runde.
+          </p>
         </div>
       </div>
 
-      {/* Login Overlay */}
+      {/* Login Overlay (optisch wie Bewertungs-Overlay) */}
       {overlayOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/60" />
-
-          <div className="relative w-full max-w-md rounded-2xl border border-white/10 bg-black/70 backdrop-blur-xl p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-white text-xl font-semibold">Einloggen</div>
-                <div className="mt-1 text-white/60 text-sm">
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.65)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+            padding: 20,
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 420,
+              background: "rgba(20,20,20,0.92)",
+              border: "1px solid rgba(255,255,255,0.16)",
+              borderRadius: 14,
+              padding: 18,
+              color: "white",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <h2 style={{ margin: "0 0 6px 0" }}>Einloggen</h2>
+                <p style={{ margin: "0 0 14px 0", opacity: 0.85, fontSize: 13 }}>
                   Bitte gib deinen Namen und die 4-stellige PIN ein.
-                </div>
+                </p>
               </div>
 
               <button
                 onClick={() => setOverlayOpen(false)}
-                className="text-white/70 hover:text-white text-sm"
+                style={{
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  background: "rgba(255,255,255,0.10)",
+                  color: "white",
+                  borderRadius: 10,
+                  padding: "8px 10px",
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
                 aria-label="Close"
               >
                 ✕
               </button>
             </div>
 
-            <div className="mt-5 space-y-3">
+            <div style={{ display: "grid", gap: 10 }}>
               <div>
-                <label className="block text-white/70 text-sm mb-1">
+                <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>
                   Runde (Slug)
-                </label>
+                </div>
                 <input
                   value={slug}
                   readOnly
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 text-white/80 outline-none"
+                  style={inputStyleReadOnly}
                 />
               </div>
 
               <div>
-                <label className="block text-white/70 text-sm mb-1">
+                <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>
                   Dein Vorname
-                </label>
+                </div>
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  autoFocus
                   placeholder="z.B. Jochen"
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 text-white outline-none focus:border-white/30"
+                  autoFocus
+                  style={inputStyle}
                 />
               </div>
 
               <div>
-                <label className="block text-white/70 text-sm mb-1">
+                <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>
                   PIN (4-stellig)
-                </label>
+                </div>
                 <input
                   value={pin}
                   onChange={(e) => setPin(e.target.value)}
+                  placeholder="1234"
                   inputMode="numeric"
                   pattern="[0-9]*"
-                  placeholder="1234"
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 text-white outline-none focus:border-white/30"
+                  style={inputStyle}
                 />
               </div>
 
               {error && (
-                <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-red-200 text-sm">
+                <div
+                  style={{
+                    borderRadius: 12,
+                    padding: 10,
+                    border: "1px solid rgba(255,120,120,0.35)",
+                    background: "rgba(255,0,0,0.10)",
+                    color: "#ffd1d1",
+                    fontSize: 13,
+                  }}
+                >
                   {error}
                 </div>
               )}
@@ -191,18 +279,113 @@ export default function TastingSlugLandingPage() {
                 disabled={
                   submitting || !slug || name.trim().length < 1 || pin.trim().length < 4
                 }
-                className="mt-2 w-full rounded-xl bg-red-600/90 hover:bg-red-600 disabled:opacity-50 disabled:hover:bg-red-600/90 text-white font-semibold py-3 transition"
+                style={{
+                  ...primaryBtnStyle,
+                  opacity:
+                    submitting || !slug || name.trim().length < 1 || pin.trim().length < 4
+                      ? 0.65
+                      : 1,
+                  cursor:
+                    submitting || !slug || name.trim().length < 1 || pin.trim().length < 4
+                      ? "not-allowed"
+                      : "pointer",
+                }}
               >
                 {submitting ? "Bitte warten …" : "Beitreten"}
               </button>
 
-              <div className="mt-2 text-white/50 text-xs">
-                Tipp: Wenn du über den QR-Code kommst, bist du direkt in der richtigen Runde.
+              <div style={{ fontSize: 12, opacity: 0.65, textAlign: "center" }}>
+                Nach dem Login wirst du direkt zu <b>Wein #1</b> weitergeleitet.
               </div>
             </div>
           </div>
         </div>
       )}
-    </main>
+    </div>
   );
 }
+
+/* Styles (wie Bewertung: Card + Background) */
+const pageStyle: React.CSSProperties = {
+  minHeight: "100vh",
+  position: "relative",
+  overflow: "hidden",
+  fontFamily: "system-ui, -apple-system, BlinkMacSystemFont",
+};
+
+const centerWrapStyle: React.CSSProperties = {
+  position: "relative",
+  zIndex: 1,
+  minHeight: "100vh",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 20,
+};
+
+const cardStyle: React.CSSProperties = {
+  width: "100%",
+  maxWidth: 520,
+  background: "rgba(20,20,20,0.78)",
+  backdropFilter: "blur(6px)",
+  borderRadius: 16,
+  padding: 24,
+  boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+  color: "white",
+};
+
+const h1Style: React.CSSProperties = {
+  marginTop: 0,
+  marginBottom: 8,
+  fontSize: 26,
+  textAlign: "left",
+  letterSpacing: 0.2,
+};
+
+const subStyle: React.CSSProperties = {
+  marginTop: 0,
+  marginBottom: 14,
+  opacity: 0.85,
+};
+
+const infoBoxStyle: React.CSSProperties = {
+  borderRadius: 12,
+  padding: 12,
+  background: "rgba(255,255,255,0.10)",
+  border: "1px solid rgba(255,255,255,0.14)",
+  marginBottom: 14,
+};
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: 10,
+  borderRadius: 10,
+  border: "1px solid rgba(255,255,255,0.18)",
+  background: "rgba(0,0,0,0.25)",
+  color: "white",
+  outline: "none",
+};
+
+const inputStyleReadOnly: React.CSSProperties = {
+  ...inputStyle,
+  opacity: 0.85,
+};
+
+const primaryBtnStyle: React.CSSProperties = {
+  marginTop: 6,
+  width: "100%",
+  padding: "12px 14px",
+  borderRadius: 10,
+  border: "none",
+  background: "linear-gradient(135deg, #8e0e00, #c0392b)",
+  color: "white",
+  fontSize: 16,
+  fontWeight: 900,
+};
+
+const footerStyle: React.CSSProperties = {
+  marginTop: 14,
+  fontSize: 12,
+  opacity: 0.6,
+  textAlign: "center",
+};
