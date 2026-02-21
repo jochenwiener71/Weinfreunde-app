@@ -1,93 +1,127 @@
-// app/api/join/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
+import { db } from "@/lib/firebase-admin";
 
-import { NextResponse } from "next/server";
-import { db } from "@/lib/firebaseAdmin";
-import { setSessionCookie } from "@/lib/session";
-import { verifyPin } from "@/lib/security";
+type JoinBody = {
+  slug: string;
+  name: string;
+  pin: string;
+};
 
-export const runtime = "nodejs";
+function verifyPin(pin: string, storedHash: string) {
+  const salt = process.env.PIN_SALT ?? "";
 
-export async function POST(req: Request) {
+  const computed = crypto
+    .createHash("sha256")
+    .update(`${pin}:${salt}`)
+    .digest("hex");
+
+  const a = Buffer.from(computed, "hex");
+  const b = Buffer.from(storedHash, "hex");
+
+  if (a.length !== b.length) return false;
+
+  return crypto.timingSafeEqual(a, b);
+}
+
+export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+    const body = (await req.json()) as JoinBody;
 
-    const rawSlug = String(body.slug ?? "").trim();
-    const name = String(body.name ?? "").trim();
-    const pin = String(body.pin ?? "").trim();
-
-    if (!rawSlug || !name || !pin) {
+    if (!body?.slug || !body?.name || !body?.pin) {
       return NextResponse.json(
         { ok: false, error: "Missing slug/name/pin" },
         { status: 400 }
       );
     }
 
-    // 🔒 Slug robust behandeln (Case-safe)
-    const slugLower = rawSlug.toLowerCase();
+    const slug = body.slug.trim().toLowerCase();
+    const name = body.name.trim();
+    const pin = body.pin.trim();
 
-    let tq = await db()
+    if (pin.length !== 4) {
+      return NextResponse.json(
+        { ok: false, error: "Invalid PIN format" },
+        { status: 400 }
+      );
+    }
+
+    // 🔎 1. Versuche über publicSlug
+    const query = await db()
       .collection("tastings")
-      .where("publicSlug", "==", rawSlug)
+      .where("publicSlug", "==", slug)
       .limit(1)
       .get();
 
-    // Fallback falls DB lowercase speichert
-    if (tq.empty && slugLower !== rawSlug) {
-      tq = await db()
-        .collection("tastings")
-        .where("publicSlug", "==", slugLower)
-        .limit(1)
-        .get();
+    let tastingDoc = null;
+
+    if (!query.empty) {
+      tastingDoc = query.docs[0];
+    } else {
+      // 🔎 2. Fallback: slug als DocId
+      const doc = await db().collection("tastings").doc(slug).get();
+      if (doc.exists) {
+        tastingDoc = doc;
+      }
     }
 
-    if (tq.empty) {
+    if (!tastingDoc) {
       return NextResponse.json(
         { ok: false, error: "Tasting not found" },
         { status: 404 }
       );
     }
 
-    const tastingDoc = tq.docs[0];
+    const tastingData = tastingDoc.data();
 
-    // Teilnehmer suchen
-    const pq = await tastingDoc.ref
+    if (!tastingData?.pinHash) {
+      return NextResponse.json(
+        { ok: false, error: "Tasting PIN not configured" },
+        { status: 500 }
+      );
+    }
+
+    const pinValid = verifyPin(pin, tastingData.pinHash);
+
+    if (!pinValid) {
+      return NextResponse.json(
+        { ok: false, error: "Invalid PIN" },
+        { status: 403 }
+      );
+    }
+
+    // 🍷 Participant anlegen
+    const participantRef = await db()
+      .collection("tastings")
+      .doc(tastingDoc.id)
       .collection("participants")
-      .where("name", "==", name)
-      .limit(1)
-      .get();
+      .add({
+        name,
+        createdAt: new Date(),
+      });
 
-    if (pq.empty) {
-      return NextResponse.json(
-        { ok: false, error: "Teilnehmer nicht gefunden" },
-        { status: 401 }
-      );
-    }
-
-    const participantDoc = pq.docs[0];
-    const p = participantDoc.data() as any;
-
-    // PIN prüfen (hash)
-    if (!verifyPin(pin, p.pinHash)) {
-      return NextResponse.json(
-        { ok: false, error: "PIN falsch" },
-        { status: 401 }
-      );
-    }
-
-    // Session setzen
     const res = NextResponse.json({ ok: true });
 
-    setSessionCookie(res, {
-      participantId: participantDoc.id,
-      participantName: p.name,
-      tastingId: tastingDoc.id,
-      publicSlug: (tastingDoc.data() as any).publicSlug,
-    });
+    // 🍪 Session Cookie setzen
+    res.cookies.set(
+      "weinfreunde_session",
+      JSON.stringify({
+        tastingId: tastingDoc.id,
+        participantId: participantRef.id,
+        participantName: name,
+      }),
+      {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+      }
+    );
 
     return res;
-  } catch (e: any) {
+  } catch (err) {
+    console.error("[JOIN ERROR]", err);
     return NextResponse.json(
-      { ok: false, error: e?.message ?? "Join failed" },
+      { ok: false, error: "Server error" },
       { status: 500 }
     );
   }
