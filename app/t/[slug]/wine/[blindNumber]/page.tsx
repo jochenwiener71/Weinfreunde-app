@@ -113,9 +113,9 @@ export default function WineRatePage({
 
         const res = await fetch(
           `/api/rating/get?slug=${encode(slug)}&blindNumber=${encode(String(blindNumber))}`,
-          { cache: "no-store" }
+          { cache: "no-store", credentials: "include" }
         );
-        const json = await res.json();
+        const json = await res.json().catch(() => ({}));
         if (!res.ok) return;
 
         if (!hasDraft && json?.ok && json?.exists && json?.rating) {
@@ -159,7 +159,8 @@ export default function WineRatePage({
 
     const parts: string[] = [];
     const winery = typeof w.winery === "string" && w.winery.trim() ? w.winery.trim() : "";
-    const name = typeof w.displayName === "string" && w.displayName.trim() ? w.displayName.trim() : "";
+    const name =
+      typeof w.displayName === "string" && w.displayName.trim() ? w.displayName.trim() : "";
     const grape = typeof w.grape === "string" && w.grape.trim() ? w.grape.trim() : "";
     const vintage = typeof w.vintage === "string" && w.vintage.trim() ? w.vintage.trim() : "";
 
@@ -179,9 +180,10 @@ export default function WineRatePage({
       const res = await fetch("/api/session/resume", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ slug, name: resumeName, pin: resumePin }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error ?? "Resume failed");
 
       setShowResume(false);
@@ -200,13 +202,14 @@ export default function WineRatePage({
       const res = await fetch("/api/rating/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ slug, blindNumber, scores, comment }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
         const errMsg = String(json?.error ?? "Save failed");
-        if (errMsg.toLowerCase().includes("not logged in")) {
+        if (res.status === 401 || errMsg.toLowerCase().includes("not logged in")) {
           setShowResume(true);
           throw new Error("Sitzung abgelaufen – bitte Name + PIN bestätigen.");
         }
@@ -300,8 +303,12 @@ export default function WineRatePage({
           {/* Wein-Details */}
           {wineTitleLine && (
             <div style={wineInfoStyle}>
-              <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>Wein-Details</div>
-              <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.35 }}>{wineTitleLine}</div>
+              <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>
+                Wein-Details
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.35 }}>
+                {wineTitleLine}
+              </div>
             </div>
           )}
 
@@ -326,9 +333,7 @@ export default function WineRatePage({
                   min={c.scaleMin}
                   max={c.scaleMax}
                   value={current}
-                  onChange={(e) =>
-                    setScores((s) => ({ ...s, [c.id]: Number(e.target.value) }))
-                  }
+                  onChange={(e) => setScores((s) => ({ ...s, [c.id]: Number(e.target.value) }))}
                   style={{ width: "100%", marginTop: 10 }}
                 />
               </div>
@@ -364,9 +369,7 @@ export default function WineRatePage({
             </p>
           )}
 
-          <p style={footerStyle}>
-            Tipp: Du kannst direkt mit „Weiter“ zum nächsten Wein springen.
-          </p>
+          <p style={footerStyle}>Tipp: Du kannst direkt mit „Weiter“ zum nächsten Wein springen.</p>
         </div>
       </div>
 
