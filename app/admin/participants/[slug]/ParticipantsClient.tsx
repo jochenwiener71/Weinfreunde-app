@@ -7,7 +7,10 @@ type Participant = {
   id: string;
   name: string | null;
   isActive: boolean;
+  _keys?: string[]; // debug
 };
+
+const LS_SECRET = "WF_ADMIN_SECRET";
 
 function btnStyle(disabled?: boolean): React.CSSProperties {
   return {
@@ -20,30 +23,13 @@ function btnStyle(disabled?: boolean): React.CSSProperties {
   };
 }
 
-function normalizeParticipant(raw: any): Participant | null {
-  if (!raw) return null;
-
-  const id = String(raw.id ?? raw.participantId ?? raw.docId ?? "").trim();
-  if (!id) return null;
-
-  const nameRaw =
-    raw.name ??
-    raw.participantName ??
-    raw.displayName ??
-    raw.fullName ??
-    null;
-
-  const name =
-    typeof nameRaw === "string" ? (nameRaw.trim() ? nameRaw.trim() : null) : null;
-
-  const isActive =
-    typeof raw.isActive === "boolean"
-      ? raw.isActive
-      : typeof raw.active === "boolean"
-      ? raw.active
-      : true;
-
-  return { id, name, isActive };
+async function readJson(res: Response) {
+  const text = await res.text();
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return { error: text || `HTTP ${res.status}` };
+  }
 }
 
 export default function ParticipantsClient({ slug }: { slug: string }) {
@@ -53,62 +39,48 @@ export default function ParticipantsClient({ slug }: { slug: string }) {
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // ✅ Restore secret from localStorage (same pattern as tastings page)
+  // ✅ Secret automatisch übernehmen
   useEffect(() => {
-    const saved =
-      typeof window !== "undefined"
-        ? window.localStorage.getItem("WF_ADMIN_SECRET")
-        : null;
-    if (saved) setAdminSecret(saved);
+    try {
+      const saved = window.localStorage.getItem(LS_SECRET) ?? "";
+      if (saved) setAdminSecret(saved);
+    } catch {
+      // ignore
+    }
   }, []);
 
   useEffect(() => {
-    if (adminSecret.trim()) {
-      window.localStorage.setItem("WF_ADMIN_SECRET", adminSecret.trim());
+    try {
+      if (adminSecret.trim()) window.localStorage.setItem(LS_SECRET, adminSecret.trim());
+    } catch {
+      // ignore
     }
   }, [adminSecret]);
 
   const canLoad = useMemo(() => adminSecret.trim().length > 0, [adminSecret]);
 
-  async function loadParticipants() {
+  async function loadParticipants(debug = false) {
     setMsg(null);
     setLoading(true);
 
     try {
-      const res = await fetch(
-        `/api/admin/list-participants?publicSlug=${encodeURIComponent(slug)}`,
-        {
-          method: "GET",
-          headers: { "x-admin-secret": adminSecret.trim() },
-          cache: "no-store",
-        }
-      );
+      const url =
+        `/api/admin/list-participants?publicSlug=${encodeURIComponent(slug)}` +
+        (debug ? `&debug=1` : ``);
 
-      const text = await res.text();
-      let json: any = {};
-      try {
-        json = text ? JSON.parse(text) : {};
-      } catch {
-        json = { error: text || `HTTP ${res.status}` };
-      }
+      const res = await fetch(url, {
+        headers: { "x-admin-secret": adminSecret.trim() },
+        cache: "no-store",
+      });
 
+      const json: any = await readJson(res);
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
 
-      const rawList =
-        (Array.isArray(json?.participants) && json.participants) ||
-        (Array.isArray(json?.items) && json.items) ||
-        (Array.isArray(json?.data) && json.data) ||
-        [];
-
-      const list = rawList
-        .map(normalizeParticipant)
-        .filter(Boolean) as Participant[];
-
+      const list: Participant[] = Array.isArray(json?.participants) ? json.participants : [];
       setParticipants(list);
       setMsg(`Geladen: ${list.length} Teilnehmer ✅`);
     } catch (e: any) {
       setMsg(e?.message ?? "Fehler");
-      setParticipants([]);
     } finally {
       setLoading(false);
     }
@@ -116,32 +88,22 @@ export default function ParticipantsClient({ slug }: { slug: string }) {
 
   async function deleteParticipant(p: Participant) {
     const displayName = p.name && p.name.trim() !== "" ? p.name : "(kein Name)";
-    if (!confirm(`Teilnehmer wirklich löschen?\n\n${displayName}\nID: ${p.id}`))
-      return;
+    if (!confirm(`Teilnehmer wirklich löschen?\n\n${displayName}\nID: ${p.id}`)) return;
 
     setMsg(null);
     setDeletingId(p.id);
 
     try {
+      // ✅ passt zu deiner Route (DELETE + Query)
       const res = await fetch(
-        `/api/admin/delete-participant?publicSlug=${encodeURIComponent(
-          slug
-        )}&participantId=${encodeURIComponent(p.id)}`,
+        `/api/admin/delete-participant?publicSlug=${encodeURIComponent(slug)}&participantId=${encodeURIComponent(p.id)}`,
         {
           method: "DELETE",
           headers: { "x-admin-secret": adminSecret.trim() },
-          cache: "no-store",
         }
       );
 
-      const text = await res.text();
-      let json: any = {};
-      try {
-        json = text ? JSON.parse(text) : {};
-      } catch {
-        json = { error: text || `HTTP ${res.status}` };
-      }
-
+      const json: any = await readJson(res);
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
 
       setParticipants((prev) => prev.filter((x) => x.id !== p.id));
@@ -154,50 +116,49 @@ export default function ParticipantsClient({ slug }: { slug: string }) {
   }
 
   return (
-    <main
-      style={{
-        padding: 20,
-        fontFamily: "system-ui",
-        maxWidth: 980,
-        margin: "0 auto",
-      }}
-    >
+    <main style={{ padding: 20, fontFamily: "system-ui", maxWidth: 980, margin: "0 auto" }}>
       <h1 style={{ margin: 0 }}>Admin · Teilnehmer verwalten</h1>
       <p style={{ marginTop: 6, opacity: 0.8 }}>
         publicSlug: <b>{slug}</b>
       </p>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
-        <Link
-          href="/admin"
-          style={{ ...btnStyle(false), textDecoration: "none", color: "inherit" }}
-        >
+        <Link href="/admin" style={{ ...btnStyle(false), textDecoration: "none", color: "inherit" }}>
           ← Admin Dashboard
         </Link>
 
         <Link
-          href="/admin/tastings"
+          href={`/admin/tastings`}
           style={{ ...btnStyle(false), textDecoration: "none", color: "inherit" }}
         >
           ← Tastings
         </Link>
 
         <Link
-          href={`/reporting/${encodeURIComponent(slug)}`}
+          href={`/admin/criteria/${encodeURIComponent(slug)}`}
           style={{ ...btnStyle(false), textDecoration: "none", color: "inherit" }}
         >
-          📊 Reporting (public)
+          🏷 Kategorien
         </Link>
+
+        <Link
+          href={`/admin/wines?publicSlug=${encodeURIComponent(slug)}`}
+          style={{ ...btnStyle(false), textDecoration: "none", color: "inherit" }}
+        >
+          🍷 Weine
+        </Link>
+
+        <a
+          href={`/join?slug=${encodeURIComponent(slug)}`}
+          target="_blank"
+          rel="noreferrer"
+          style={{ ...btnStyle(false), textDecoration: "none", color: "inherit", display: "inline-flex", alignItems: "center" }}
+        >
+          🔗 Join
+        </a>
       </div>
 
-      <section
-        style={{
-          marginTop: 16,
-          border: "1px solid rgba(0,0,0,0.12)",
-          borderRadius: 12,
-          padding: 14,
-        }}
-      >
+      <section style={{ marginTop: 16, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 12, padding: 14 }}>
         <label style={{ display: "block" }}>
           ADMIN_SECRET
           <input
@@ -217,40 +178,29 @@ export default function ParticipantsClient({ slug }: { slug: string }) {
         </label>
 
         <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button
-            onClick={loadParticipants}
-            disabled={!canLoad || loading}
-            style={btnStyle(!canLoad || loading)}
-          >
+          <button onClick={() => loadParticipants(false)} disabled={!canLoad || loading} style={btnStyle(!canLoad || loading)}>
             {loading ? "Lade..." : "Teilnehmer laden"}
+          </button>
+
+          <button onClick={() => loadParticipants(true)} disabled={!canLoad || loading} style={btnStyle(!canLoad || loading)}>
+            {loading ? "Lade..." : "Debug laden"}
           </button>
         </div>
 
         {msg && (
-          <p
-            style={{
-              marginTop: 10,
-              color: msg.includes("✅") ? "inherit" : "crimson",
-              whiteSpace: "pre-wrap",
-            }}
-          >
+          <p style={{ marginTop: 10, color: msg.includes("✅") ? "inherit" : "crimson", whiteSpace: "pre-wrap" }}>
             {msg}
           </p>
         )}
       </section>
 
       <section style={{ marginTop: 16 }}>
-        <div
-          style={{
-            overflowX: "auto",
-            border: "1px solid rgba(0,0,0,0.12)",
-            borderRadius: 12,
-          }}
-        >
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
+        <div style={{ overflowX: "auto", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 12 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
             <thead>
               <tr style={{ background: "rgba(0,0,0,0.04)" }}>
                 <th style={{ textAlign: "left", padding: 10 }}>Name</th>
+                <th style={{ textAlign: "left", padding: 10, width: 260 }}>Info</th>
                 <th style={{ textAlign: "right", padding: 10, width: 140 }}>Aktion</th>
               </tr>
             </thead>
@@ -261,21 +211,14 @@ export default function ParticipantsClient({ slug }: { slug: string }) {
                   <tr key={p.id} style={{ borderTop: "1px solid rgba(0,0,0,0.08)" }}>
                     <td style={{ padding: 10 }}>
                       <div style={{ fontWeight: 600 }}>{displayName}</div>
+                      {!p.isActive ? <div style={{ marginTop: 2, fontSize: 12, opacity: 0.7 }}>(inaktiv)</div> : null}
+                    </td>
 
-                      <div
-                        style={{
-                          marginTop: 2,
-                          fontFamily: "ui-monospace",
-                          fontSize: 12,
-                          opacity: 0.75,
-                        }}
-                      >
-                        ID: {p.id}
-                      </div>
-
-                      {!p.isActive ? (
-                        <div style={{ marginTop: 2, fontSize: 12, opacity: 0.7 }}>
-                          (inaktiv)
+                    <td style={{ padding: 10, fontFamily: "ui-monospace", fontSize: 12, opacity: 0.75 }}>
+                      ID: {p.id}
+                      {p._keys?.length ? (
+                        <div style={{ marginTop: 6, opacity: 0.85 }}>
+                          keys: {p._keys.join(", ")}
                         </div>
                       ) : null}
                     </td>
@@ -295,7 +238,7 @@ export default function ParticipantsClient({ slug }: { slug: string }) {
 
               {participants.length === 0 && (
                 <tr>
-                  <td colSpan={2} style={{ padding: 12, opacity: 0.7 }}>
+                  <td colSpan={3} style={{ padding: 12, opacity: 0.7 }}>
                     Noch keine Daten geladen.
                   </td>
                 </tr>
