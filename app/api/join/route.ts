@@ -1,7 +1,7 @@
 // app/api/join/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
-import { db } from "@/lib/firebase-admin";
+import { db } from "@/lib/firebaseAdmin";
 import { setSessionCookie } from "@/lib/session";
 
 type JoinBody = {
@@ -19,7 +19,7 @@ function verifyPin(pin: string, storedHash: string) {
     .digest("hex");
 
   const a = Buffer.from(computed, "hex");
-  const b = Buffer.from(storedHash, "hex");
+  const b = Buffer.from(String(storedHash ?? ""), "hex");
 
   if (a.length !== b.length) return false;
   return crypto.timingSafeEqual(a, b);
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 🔎 1) Lookup by publicSlug
+    // 1) Lookup by publicSlug
     const query = await db()
       .collection("tastings")
       .where("publicSlug", "==", slug)
@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
     if (!query.empty) {
       tastingDoc = query.docs[0];
     } else {
-      // 🔎 2) Fallback: slug as DocId
+      // 2) Fallback: slug as docId
       const doc = await db().collection("tastings").doc(slug).get();
       if (doc.exists) tastingDoc = doc;
     }
@@ -81,15 +81,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const pinValid = verifyPin(pin, String(tastingData.pinHash));
-    if (!pinValid) {
+    if (!verifyPin(pin, tastingData.pinHash)) {
       return NextResponse.json(
         { ok: false, error: "Invalid PIN" },
         { status: 403 }
       );
     }
 
-    // 🍷 Participant anlegen
+    // Participant anlegen
     const participantRef = await db()
       .collection("tastings")
       .doc(tastingDoc.id)
@@ -101,7 +100,15 @@ export async function POST(req: NextRequest) {
 
     const res = NextResponse.json({ ok: true });
 
-    // ✅ Session-Cookie (SIGNED) setzen -> kompatibel zu requireSession()
+    // ✅ alten Cookie (falls vorhanden) entfernen – optional aber empfehlenswert
+    res.cookies.set({
+      name: "weinfreunde_session",
+      value: "",
+      path: "/",
+      maxAge: 0,
+    });
+
+    // ✅ KORREKTEN Cookie setzen (wf_session)
     setSessionCookie(res, {
       tastingId: tastingDoc.id,
       participantId: participantRef.id,
