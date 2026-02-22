@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Participant = {
   id: string;
@@ -20,12 +20,53 @@ function btnStyle(disabled?: boolean): React.CSSProperties {
   };
 }
 
+function normalizeParticipant(raw: any): Participant | null {
+  if (!raw) return null;
+
+  const id = String(raw.id ?? raw.participantId ?? raw.docId ?? "").trim();
+  if (!id) return null;
+
+  const nameRaw =
+    raw.name ??
+    raw.participantName ??
+    raw.displayName ??
+    raw.fullName ??
+    null;
+
+  const name =
+    typeof nameRaw === "string" ? (nameRaw.trim() ? nameRaw.trim() : null) : null;
+
+  const isActive =
+    typeof raw.isActive === "boolean"
+      ? raw.isActive
+      : typeof raw.active === "boolean"
+      ? raw.active
+      : true;
+
+  return { id, name, isActive };
+}
+
 export default function ParticipantsClient({ slug }: { slug: string }) {
   const [adminSecret, setAdminSecret] = useState("");
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // ✅ Restore secret from localStorage (same pattern as tastings page)
+  useEffect(() => {
+    const saved =
+      typeof window !== "undefined"
+        ? window.localStorage.getItem("WF_ADMIN_SECRET")
+        : null;
+    if (saved) setAdminSecret(saved);
+  }, []);
+
+  useEffect(() => {
+    if (adminSecret.trim()) {
+      window.localStorage.setItem("WF_ADMIN_SECRET", adminSecret.trim());
+    }
+  }, [adminSecret]);
 
   const canLoad = useMemo(() => adminSecret.trim().length > 0, [adminSecret]);
 
@@ -34,10 +75,14 @@ export default function ParticipantsClient({ slug }: { slug: string }) {
     setLoading(true);
 
     try {
-      const res = await fetch(`/api/admin/list-participants?publicSlug=${encodeURIComponent(slug)}`, {
-        headers: { "x-admin-secret": adminSecret.trim() },
-        cache: "no-store",
-      });
+      const res = await fetch(
+        `/api/admin/list-participants?publicSlug=${encodeURIComponent(slug)}`,
+        {
+          method: "GET",
+          headers: { "x-admin-secret": adminSecret.trim() },
+          cache: "no-store",
+        }
+      );
 
       const text = await res.text();
       let json: any = {};
@@ -49,11 +94,21 @@ export default function ParticipantsClient({ slug }: { slug: string }) {
 
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
 
-      const list: Participant[] = Array.isArray(json?.participants) ? json.participants : [];
+      const rawList =
+        (Array.isArray(json?.participants) && json.participants) ||
+        (Array.isArray(json?.items) && json.items) ||
+        (Array.isArray(json?.data) && json.data) ||
+        [];
+
+      const list = rawList
+        .map(normalizeParticipant)
+        .filter(Boolean) as Participant[];
+
       setParticipants(list);
       setMsg(`Geladen: ${list.length} Teilnehmer ✅`);
     } catch (e: any) {
       setMsg(e?.message ?? "Fehler");
+      setParticipants([]);
     } finally {
       setLoading(false);
     }
@@ -61,18 +116,21 @@ export default function ParticipantsClient({ slug }: { slug: string }) {
 
   async function deleteParticipant(p: Participant) {
     const displayName = p.name && p.name.trim() !== "" ? p.name : "(kein Name)";
-    if (!confirm(`Teilnehmer wirklich löschen?\n\n${displayName}\nID: ${p.id}`)) return;
+    if (!confirm(`Teilnehmer wirklich löschen?\n\n${displayName}\nID: ${p.id}`))
+      return;
 
     setMsg(null);
     setDeletingId(p.id);
 
     try {
-      // Variante A: DELETE mit Query Params (passt zu deiner API-Struktur im Repo)
       const res = await fetch(
-        `/api/admin/delete-participant?publicSlug=${encodeURIComponent(slug)}&participantId=${encodeURIComponent(p.id)}`,
+        `/api/admin/delete-participant?publicSlug=${encodeURIComponent(
+          slug
+        )}&participantId=${encodeURIComponent(p.id)}`,
         {
           method: "DELETE",
           headers: { "x-admin-secret": adminSecret.trim() },
+          cache: "no-store",
         }
       );
 
@@ -96,16 +154,34 @@ export default function ParticipantsClient({ slug }: { slug: string }) {
   }
 
   return (
-    <main style={{ padding: 20, fontFamily: "system-ui", maxWidth: 980, margin: "0 auto" }}>
+    <main
+      style={{
+        padding: 20,
+        fontFamily: "system-ui",
+        maxWidth: 980,
+        margin: "0 auto",
+      }}
+    >
       <h1 style={{ margin: 0 }}>Admin · Teilnehmer verwalten</h1>
       <p style={{ marginTop: 6, opacity: 0.8 }}>
         publicSlug: <b>{slug}</b>
       </p>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
-        <Link href="/admin" style={{ ...btnStyle(false), textDecoration: "none", color: "inherit" }}>
+        <Link
+          href="/admin"
+          style={{ ...btnStyle(false), textDecoration: "none", color: "inherit" }}
+        >
           ← Admin Dashboard
         </Link>
+
+        <Link
+          href="/admin/tastings"
+          style={{ ...btnStyle(false), textDecoration: "none", color: "inherit" }}
+        >
+          ← Tastings
+        </Link>
+
         <Link
           href={`/reporting/${encodeURIComponent(slug)}`}
           style={{ ...btnStyle(false), textDecoration: "none", color: "inherit" }}
@@ -114,7 +190,14 @@ export default function ParticipantsClient({ slug }: { slug: string }) {
         </Link>
       </div>
 
-      <section style={{ marginTop: 16, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 12, padding: 14 }}>
+      <section
+        style={{
+          marginTop: 16,
+          border: "1px solid rgba(0,0,0,0.12)",
+          borderRadius: 12,
+          padding: 14,
+        }}
+      >
         <label style={{ display: "block" }}>
           ADMIN_SECRET
           <input
@@ -123,25 +206,47 @@ export default function ParticipantsClient({ slug }: { slug: string }) {
             placeholder="ADMIN_SECRET"
             autoCapitalize="none"
             autoCorrect="off"
-            style={{ width: "100%", padding: 10, marginTop: 6, borderRadius: 10, border: "1px solid rgba(0,0,0,0.2)" }}
+            style={{
+              width: "100%",
+              padding: 10,
+              marginTop: 6,
+              borderRadius: 10,
+              border: "1px solid rgba(0,0,0,0.2)",
+            }}
           />
         </label>
 
         <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button onClick={loadParticipants} disabled={!canLoad || loading} style={btnStyle(!canLoad || loading)}>
+          <button
+            onClick={loadParticipants}
+            disabled={!canLoad || loading}
+            style={btnStyle(!canLoad || loading)}
+          >
             {loading ? "Lade..." : "Teilnehmer laden"}
           </button>
         </div>
 
         {msg && (
-          <p style={{ marginTop: 10, color: msg.includes("✅") ? "inherit" : "crimson", whiteSpace: "pre-wrap" }}>
+          <p
+            style={{
+              marginTop: 10,
+              color: msg.includes("✅") ? "inherit" : "crimson",
+              whiteSpace: "pre-wrap",
+            }}
+          >
             {msg}
           </p>
         )}
       </section>
 
       <section style={{ marginTop: 16 }}>
-        <div style={{ overflowX: "auto", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 12 }}>
+        <div
+          style={{
+            overflowX: "auto",
+            border: "1px solid rgba(0,0,0,0.12)",
+            borderRadius: 12,
+          }}
+        >
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
             <thead>
               <tr style={{ background: "rgba(0,0,0,0.04)" }}>
@@ -157,12 +262,21 @@ export default function ParticipantsClient({ slug }: { slug: string }) {
                     <td style={{ padding: 10 }}>
                       <div style={{ fontWeight: 600 }}>{displayName}</div>
 
-                      <div style={{ marginTop: 2, fontFamily: "ui-monospace", fontSize: 12, opacity: 0.75 }}>
+                      <div
+                        style={{
+                          marginTop: 2,
+                          fontFamily: "ui-monospace",
+                          fontSize: 12,
+                          opacity: 0.75,
+                        }}
+                      >
                         ID: {p.id}
                       </div>
 
                       {!p.isActive ? (
-                        <div style={{ marginTop: 2, fontSize: 12, opacity: 0.7 }}>(inaktiv)</div>
+                        <div style={{ marginTop: 2, fontSize: 12, opacity: 0.7 }}>
+                          (inaktiv)
+                        </div>
                       ) : null}
                     </td>
 
