@@ -72,7 +72,9 @@ export default function AdminTastingsPage() {
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 980 }}>
       <h1 style={{ marginBottom: 6 }}>Admin · Tastings</h1>
-      <p style={{ marginTop: 0, opacity: 0.75 }}>Liste & Verwaltung deiner Tastings.</p>
+      <p style={{ marginTop: 0, opacity: 0.75 }}>
+        Liste & Verwaltung deiner Tastings.
+      </p>
 
       <section style={{ marginTop: 18 }}>
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>Admin</h2>
@@ -88,8 +90,19 @@ export default function AdminTastingsPage() {
           />
         </label>
 
-        <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
-          <button onClick={load} disabled={!canLoad || loading} style={{ padding: "10px 12px" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            marginTop: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <button
+            onClick={load}
+            disabled={!canLoad || loading}
+            style={{ padding: "10px 12px" }}
+          >
             {loading ? "Lade..." : "Tastings laden"}
           </button>
 
@@ -123,7 +136,12 @@ export default function AdminTastingsPage() {
         </div>
 
         {msg && (
-          <p style={{ marginTop: 12, color: msg.includes("✅") ? "inherit" : "crimson" }}>
+          <p
+            style={{
+              marginTop: 12,
+              color: msg.includes("✅") ? "inherit" : "crimson",
+            }}
+          >
             {msg}
           </p>
         )}
@@ -135,19 +153,70 @@ export default function AdminTastingsPage() {
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>Tastings</h2>
 
         {!items.length ? (
-          <p style={{ opacity: 0.7 }}>Noch keine Daten geladen – klicke „Tastings laden“.</p>
+          <p style={{ opacity: 0.7 }}>
+            Noch keine Daten geladen – klicke „Tastings laden“.
+          </p>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ textAlign: "left" }}>
-                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Slug</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Titel</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Host</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Status</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Weine</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Gäste</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.15)" }}>Aktionen</th>
+                  <th
+                    style={{
+                      padding: 10,
+                      borderBottom: "1px solid rgba(0,0,0,0.15)",
+                    }}
+                  >
+                    Slug
+                  </th>
+                  <th
+                    style={{
+                      padding: 10,
+                      borderBottom: "1px solid rgba(0,0,0,0.15)",
+                    }}
+                  >
+                    Titel
+                  </th>
+                  <th
+                    style={{
+                      padding: 10,
+                      borderBottom: "1px solid rgba(0,0,0,0.15)",
+                    }}
+                  >
+                    Host
+                  </th>
+                  <th
+                    style={{
+                      padding: 10,
+                      borderBottom: "1px solid rgba(0,0,0,0.15)",
+                    }}
+                  >
+                    Status
+                  </th>
+                  <th
+                    style={{
+                      padding: 10,
+                      borderBottom: "1px solid rgba(0,0,0,0.15)",
+                    }}
+                  >
+                    Weine
+                  </th>
+                  <th
+                    style={{
+                      padding: 10,
+                      borderBottom: "1px solid rgba(0,0,0,0.15)",
+                    }}
+                  >
+                    Gäste
+                  </th>
+                  <th
+                    style={{
+                      padding: 10,
+                      borderBottom: "1px solid rgba(0,0,0,0.15)",
+                    }}
+                  >
+                    Aktionen
+                  </th>
                 </tr>
               </thead>
 
@@ -156,42 +225,80 @@ export default function AdminTastingsPage() {
                   const slug = (t.publicSlug ?? "").trim();
                   const encoded = encodeURIComponent(slug);
 
-                  // Base: /admin/tastings/[publicSlug]
-                  const manageBase = `/admin/tastings/${encoded}`;
-
-                  // ✅ FIX: echte Unterseiten (statt #hash)
-                  const participantsUrl = `/admin/tastings/${encoded}/participants`;
-                  const criteriaUrl = `/admin/tastings/${encoded}/criteria`;
+                  // ✅ Repo-Struktur laut Screenshot:
+                  // - /admin/tasting/[slug]
+                  // - /admin/participants/[slug]
+                  // - /admin/criteria/[slug]
+                  const manageUrl = `/admin/tasting/${encoded}`;
+                  const participantsUrl = `/admin/participants/${encoded}`;
+                  const criteriaUrl = `/admin/criteria/${encoded}`;
 
                   return (
                     <tr key={t.id}>
-                      <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                      <td
+                        style={{
+                          padding: 10,
+                          borderBottom: "1px solid rgba(0,0,0,0.08)",
+                        }}
+                      >
                         <code>{slug}</code>
                       </td>
 
-                      <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
-                        {t.title || <span style={{ opacity: 0.6 }}>(ohne Titel)</span>}
+                      <td
+                        style={{
+                          padding: 10,
+                          borderBottom: "1px solid rgba(0,0,0,0.08)",
+                        }}
+                      >
+                        {t.title || (
+                          <span style={{ opacity: 0.6 }}>(ohne Titel)</span>
+                        )}
                       </td>
 
-                      <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                      <td
+                        style={{
+                          padding: 10,
+                          borderBottom: "1px solid rgba(0,0,0,0.08)",
+                        }}
+                      >
                         {t.hostName || <span style={{ opacity: 0.6 }}>(-)</span>}
                       </td>
 
-                      <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                      <td
+                        style={{
+                          padding: 10,
+                          borderBottom: "1px solid rgba(0,0,0,0.08)",
+                        }}
+                      >
                         <code>{t.status || "-"}</code>
                       </td>
 
-                      <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                      <td
+                        style={{
+                          padding: 10,
+                          borderBottom: "1px solid rgba(0,0,0,0.08)",
+                        }}
+                      >
                         {t.wineCount ?? "-"}
                       </td>
 
-                      <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                      <td
+                        style={{
+                          padding: 10,
+                          borderBottom: "1px solid rgba(0,0,0,0.08)",
+                        }}
+                      >
                         {t.maxParticipants ?? "-"}
                       </td>
 
-                      <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+                      <td
+                        style={{
+                          padding: 10,
+                          borderBottom: "1px solid rgba(0,0,0,0.08)",
+                        }}
+                      >
                         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                          <Link href={manageBase}>Verwalten</Link>
+                          <Link href={manageUrl}>Verwalten</Link>
                           <Link href={participantsUrl}>Teilnehmer</Link>
                           <Link href={criteriaUrl}>Kategorien</Link>
 
