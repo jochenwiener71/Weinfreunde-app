@@ -1,13 +1,60 @@
+// app/api/tasting/summary/route.ts
 import { NextResponse } from "next/server";
+import admin from "firebase-admin";
 import { db } from "@/lib/firebaseAdmin";
 
-type Criterion = { id: string; label: string; order: number };
+export const runtime = "nodejs";
 
-type SummaryRow = {
-  blindNumber: number;
-  perCrit: Record<string, number | null>;
-  overall: number | null;
+type Criterion = {
+  id: string;
+  label: string;
+  order: number;
+  isActive?: boolean | null;
 };
+
+type RatingDoc = {
+  participantId?: string;
+  blindNumber?: number;
+  scores?: Record<string, number>;
+  comment?: string | null;
+  createdAt?: any;
+  updatedAt?: any;
+};
+
+function num(v: any): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+async function getTastingBySlug(publicSlug: string) {
+  const snap = await db()
+    .collection("tastings")
+    .where("publicSlug", "==", publicSlug)
+    .limit(1)
+    .get();
+
+  if (snap.empty) return null;
+  return snap.docs[0];
+}
+
+async function getCriteria(tastingRef: admin.firestore.DocumentReference): Promise<Criterion[]> {
+  // Erwartet: subcollection "criteria"
+  const snap = await tastingRef.collection("criteria").get();
+  const arr: Criterion[] = snap.docs.map((d) => {
+    const x = d.data() as any;
+    return {
+      id: d.id,
+      label: String(x?.label ?? x?.name ?? d.id),
+      order: Number.isFinite(Number(x?.order)) ? Number(x?.order) : 9999,
+      isActive: typeof x?.isActive === "boolean" ? x.isActive : true,
+    };
+  });
+
+  // nur aktive Kriterien für Score/Overall (du kannst das ändern, wenn du inactive trotzdem zeigen willst)
+  return arr
+    .filter((c) => c.isActive !== false)
+    .sort((a, b) => (a.order ?? 9999) - (b.order ?? 9999));
+}
 
 export async function GET(req: Request) {
   try {
@@ -15,148 +62,104 @@ export async function GET(req: Request) {
     const publicSlug = String(searchParams.get("publicSlug") ?? "").trim();
 
     if (!publicSlug) {
-      return NextResponse.json({ error: "Missing publicSlug" }, { status: 400 });
+      return NextResponse.json({ ok: false, error: "Missing publicSlug" }, { status: 400 });
     }
 
-    // find tasting
-    const tSnap = await db()
-      .collection("tastings")
-      .where("publicSlug", "==", publicSlug)
-      .limit(1)
-      .get();
-
-    if (tSnap.empty) {
-      return NextResponse.json({ error: "Tasting not found" }, { status: 404 });
+    const tastingDoc = await getTastingBySlug(publicSlug);
+    if (!tastingDoc) {
+      return NextResponse.json({ ok: false, error: "Tasting not found" }, { status: 404 });
     }
 
-    const tDoc = tSnap.docs[0];
-    const tastingId = tDoc.id;
-    const t = tDoc.data() as any;
+    const tasting = tastingDoc.data() as any;
+    const tastingRef = tastingDoc.ref;
 
-    // criteria
-    const cSnap = await db()
-      .collection("tastings")
-      .doc(tastingId)
-      .collection("criteria")
-      .get();
+    const wineCount = Number(tasting?.wineCount ?? 0) || 0;
+    const status = String(tasting?.status ?? "").trim() || null;
 
-    const criteria: Criterion[] = cSnap.docs
-      .map((d) => {
-        const cd = d.data() as any;
-        return {
-          id: d.id,
-          label: String(cd.label ?? d.id),
-          order: typeof cd.order === "number" ? cd.order : 999,
-        };
-      })
-      .sort((a, b) => a.order - b.order);
+    const criteria = await getCriteria(tastingRef);
 
-    // wines (for blind numbers)
-    const wSnap = await db()
-      .collection("tastings")
-      .doc(tastingId)
-      .collection("wines")
-      .get();
+    // Ratings laden (collection: tastings/{id}/ratings)
+    const ratingsSnap = await tastingRef.collection("ratings").get();
+    const ratings: RatingDoc[] = ratingsSnap.docs.map((d) => (d.data() ?? {}) as RatingDoc);
+    const ratingCount = ratingsSnap.size;
 
-    const wineCount =
-      typeof t.wineCount === "number" ? t.wineCount : wSnap.size;
+    // Aggregation: sums[blindNumber][criterionId] = { sum, count }
+    const sums = new Map<number, Map<string, { sum: number; count: number }>>();
 
-    // build blind number list (1..wineCount)
-    const rows: SummaryRow[] = Array.from({ length: wineCount }, (_, i) => {
+    for (const r of ratings) {
+      const bn = Number(r?.blindNumber);
+      if (!Number.isFinite(bn) || bn < 1) continue;
+
+      const scoreObj = r?.scores ?? {};
+      if (!scoreObj || typeof scoreObj !== "object") continue;
+
+      let wineMap = sums.get(bn);
+      if (!wineMap) {
+        wineMap = new Map();
+        sums.set(bn, wineMap);
+      }
+
+      for (const c of criteria) {
+        const v = num((scoreObj as any)[c.id]); // ✅ KEY = criterionId
+        if (v == null) continue;
+
+        const cur = wineMap.get(c.id) ?? { sum: 0, count: 0 };
+        cur.sum += v;
+        cur.count += 1;
+        wineMap.set(c.id, cur);
+      }
+    }
+
+    // Rows für 1..wineCount
+    const rows = Array.from({ length: wineCount }, (_, i) => {
       const blindNumber = i + 1;
+      const wineMap = sums.get(blindNumber);
+
       const perCrit: Record<string, number | null> = {};
-      for (const c of criteria) perCrit[c.label] = null;
-      return { blindNumber, perCrit, overall: null };
+      let overallSum = 0;
+      let overallCount = 0;
+
+      for (const c of criteria) {
+        const cell = wineMap?.get(c.id);
+        const avg = cell && cell.count > 0 ? cell.sum / cell.count : null;
+        perCrit[c.id] = avg;
+
+        if (avg != null) {
+          overallSum += avg;
+          overallCount += 1;
+        }
+      }
+
+      const overall = overallCount > 0 ? overallSum / overallCount : null;
+
+      return { blindNumber, perCrit, overall };
     });
 
-    // ratings
-    const rSnap = await db()
-      .collection("tastings")
-      .doc(tastingId)
-      .collection("ratings")
-      .get();
-
-    // aggregate: blindNumber -> criterionLabel -> values[]
-    const agg: Record<number, Record<string, number[]>> = {};
-
-    for (const doc of rSnap.docs) {
-      const rd = doc.data() as any;
-      const wineId = String(rd.wineId ?? "");
-      if (!wineId) continue;
-
-      const wDoc = wSnap.docs.find((w) => w.id === wineId);
-      const wd = wDoc ? (wDoc.data() as any) : null;
-      const blindNumber =
-        wd && typeof wd.blindNumber === "number" ? wd.blindNumber : null;
-
-      if (!blindNumber || blindNumber < 1) continue;
-
-      const scores = (rd.scores ?? {}) as Record<string, any>;
-      if (!agg[blindNumber]) agg[blindNumber] = {};
-
-      for (const c of criteria) {
-        const raw = scores[c.id];
-        const val = typeof raw === "number" ? raw : null;
-        if (val == null) continue;
-
-        const label = c.label;
-        if (!agg[blindNumber][label]) agg[blindNumber][label] = [];
-        agg[blindNumber][label].push(val);
-      }
-    }
-
-    // compute averages
-    for (const row of rows) {
-      const per = agg[row.blindNumber] ?? {};
-
-      let sumOverall = 0;
-      let countOverall = 0;
-
-      for (const c of criteria) {
-        const vals = per[c.label] ?? [];
-        if (!vals.length) {
-          row.perCrit[c.label] = null;
-          continue;
-        }
-
-        const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-        const rounded = Math.round(avg * 100) / 100;
-        row.perCrit[c.label] = rounded;
-
-        sumOverall += avg;
-        countOverall++;
-      }
-
-      row.overall =
-        countOverall > 0
-          ? Math.round((sumOverall / countOverall) * 100) / 100
-          : null;
-    }
-
+    // Ranking: nur Weine mit overall
     const ranking = rows
-      .filter((r) => typeof r.overall === "number")
       .slice()
-      .sort((a, b) => (b.overall ?? -999) - (a.overall ?? -999));
+      .filter((r) => typeof r.blindNumber === "number")
+      .sort((a, b) => {
+        const ao = a.overall;
+        const bo = b.overall;
+        if (ao == null && bo == null) return a.blindNumber - b.blindNumber;
+        if (ao == null) return 1;
+        if (bo == null) return -1;
+        return bo - ao;
+      });
 
     return NextResponse.json({
       ok: true,
       publicSlug,
-      tastingId,
-      status: t.status ?? null,
+      tastingId: tastingDoc.id,
+      status,
       wineCount,
-      criteria: criteria.map((c) => ({
-        id: c.id,
-        label: c.label,
-        order: c.order,
-      })),
+      criteria: criteria.map((c) => ({ id: c.id, label: c.label, order: c.order })),
       rows,
       ranking,
-      ratingCount: rSnap.size,
+      ratingCount,
     });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message ?? "Error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: e?.message ?? "Error" }, { status: 500 });
   }
 }
