@@ -11,9 +11,6 @@ type TastingListItem = {
   status: string;
   wineCount: number | null;
   maxParticipants: number | null;
-  tastingDate?: string;
-  createdAt?: string | null;
-  updatedAt?: string | null;
 };
 
 export default function AdminTastingsPage() {
@@ -22,7 +19,7 @@ export default function AdminTastingsPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [items, setItems] = useState<TastingListItem[]>([]);
 
-  // Restore secret from localStorage (optional but practical)
+  // Secret aus localStorage laden
   useEffect(() => {
     const saved =
       typeof window !== "undefined"
@@ -31,6 +28,7 @@ export default function AdminTastingsPage() {
     if (saved) setAdminSecret(saved);
   }, []);
 
+  // Secret speichern
   useEffect(() => {
     if (adminSecret.trim()) {
       window.localStorage.setItem("WF_ADMIN_SECRET", adminSecret.trim());
@@ -60,6 +58,7 @@ export default function AdminTastingsPage() {
       }
 
       if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+
       setItems(Array.isArray(data?.tastings) ? data.tastings : []);
       setMsg("Geladen ✅");
     } catch (e: any) {
@@ -70,14 +69,15 @@ export default function AdminTastingsPage() {
   }
 
   return (
-    <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 980 }}>
+    <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 1000 }}>
       <h1 style={{ marginBottom: 6 }}>Admin · Tastings</h1>
       <p style={{ marginTop: 0, opacity: 0.75 }}>
-        Liste & Verwaltung deiner Tastings.
+        Übersicht & Verwaltung deiner Tastings.
       </p>
 
       <section style={{ marginTop: 18 }}>
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>Admin</h2>
+
         <label style={{ display: "block" }}>
           ADMIN_SECRET
           <input
@@ -90,14 +90,7 @@ export default function AdminTastingsPage() {
           />
         </label>
 
-        <div
-          style={{
-            display: "flex",
-            gap: 10,
-            marginTop: 12,
-            flexWrap: "wrap",
-          }}
-        >
+        <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
           <button
             onClick={load}
             disabled={!canLoad || loading}
@@ -161,151 +154,58 @@ export default function AdminTastingsPage() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ textAlign: "left" }}>
-                  <th
-                    style={{
-                      padding: 10,
-                      borderBottom: "1px solid rgba(0,0,0,0.15)",
-                    }}
-                  >
-                    Slug
-                  </th>
-                  <th
-                    style={{
-                      padding: 10,
-                      borderBottom: "1px solid rgba(0,0,0,0.15)",
-                    }}
-                  >
-                    Titel
-                  </th>
-                  <th
-                    style={{
-                      padding: 10,
-                      borderBottom: "1px solid rgba(0,0,0,0.15)",
-                    }}
-                  >
-                    Host
-                  </th>
-                  <th
-                    style={{
-                      padding: 10,
-                      borderBottom: "1px solid rgba(0,0,0,0.15)",
-                    }}
-                  >
-                    Status
-                  </th>
-                  <th
-                    style={{
-                      padding: 10,
-                      borderBottom: "1px solid rgba(0,0,0,0.15)",
-                    }}
-                  >
-                    Weine
-                  </th>
-                  <th
-                    style={{
-                      padding: 10,
-                      borderBottom: "1px solid rgba(0,0,0,0.15)",
-                    }}
-                  >
-                    Gäste
-                  </th>
-                  <th
-                    style={{
-                      padding: 10,
-                      borderBottom: "1px solid rgba(0,0,0,0.15)",
-                    }}
-                  >
-                    Aktionen
-                  </th>
+                  <th style={{ padding: 10 }}>Slug</th>
+                  <th style={{ padding: 10 }}>Titel</th>
+                  <th style={{ padding: 10 }}>Host</th>
+                  <th style={{ padding: 10 }}>Status</th>
+                  <th style={{ padding: 10 }}>Weine</th>
+                  <th style={{ padding: 10 }}>Gäste</th>
+                  <th style={{ padding: 10 }}>Aktionen</th>
                 </tr>
               </thead>
-
               <tbody>
                 {items.map((t) => {
                   const slug = (t.publicSlug ?? "").trim();
                   const encoded = encodeURIComponent(slug);
 
-                  // ✅ Repo-Struktur laut Screenshot:
-                  // - /admin/tasting/[slug]
-                  // - /admin/participants/[slug]
-                  // - /admin/criteria/[slug]
-                  const manageUrl = `/admin/tasting/${encoded}`;
                   const participantsUrl = `/admin/participants/${encoded}`;
                   const criteriaUrl = `/admin/criteria/${encoded}`;
+                  const winesUrl = `/admin/wines?publicSlug=${encoded}`;
+                  const joinUrl = `/join?slug=${encoded}`;
 
                   return (
-                    <tr key={t.id}>
-                      <td
-                        style={{
-                          padding: 10,
-                          borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        }}
-                      >
+                    <tr key={t.id} style={{ borderTop: "1px solid rgba(0,0,0,0.08)" }}>
+                      <td style={{ padding: 10 }}>
                         <code>{slug}</code>
                       </td>
 
-                      <td
-                        style={{
-                          padding: 10,
-                          borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        }}
-                      >
-                        {t.title || (
-                          <span style={{ opacity: 0.6 }}>(ohne Titel)</span>
-                        )}
+                      <td style={{ padding: 10 }}>
+                        {t.title || <span style={{ opacity: 0.6 }}>(ohne Titel)</span>}
                       </td>
 
-                      <td
-                        style={{
-                          padding: 10,
-                          borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        }}
-                      >
+                      <td style={{ padding: 10 }}>
                         {t.hostName || <span style={{ opacity: 0.6 }}>(-)</span>}
                       </td>
 
-                      <td
-                        style={{
-                          padding: 10,
-                          borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        }}
-                      >
+                      <td style={{ padding: 10 }}>
                         <code>{t.status || "-"}</code>
                       </td>
 
-                      <td
-                        style={{
-                          padding: 10,
-                          borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        }}
-                      >
+                      <td style={{ padding: 10 }}>
                         {t.wineCount ?? "-"}
                       </td>
 
-                      <td
-                        style={{
-                          padding: 10,
-                          borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        }}
-                      >
+                      <td style={{ padding: 10 }}>
                         {t.maxParticipants ?? "-"}
                       </td>
 
-                      <td
-                        style={{
-                          padding: 10,
-                          borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        }}
-                      >
+                      <td style={{ padding: 10 }}>
                         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                          <Link href={manageUrl}>Verwalten</Link>
-                          <Link href={participantsUrl}>Teilnehmer</Link>
-                          <Link href={criteriaUrl}>Kategorien</Link>
-
-                          <Link href={`/admin/wines?publicSlug=${encoded}`}>Weine</Link>
-
-                          <a href={`/join?slug=${encoded}`} target="_blank" rel="noreferrer">
-                            Join-Link
+                          <Link href={participantsUrl}>👥 Teilnehmer</Link>
+                          <Link href={criteriaUrl}>🏷 Kategorien</Link>
+                          <Link href={winesUrl}>🍷 Weine</Link>
+                          <a href={joinUrl} target="_blank" rel="noreferrer">
+                            🔗 Join
                           </a>
                         </div>
                       </td>
