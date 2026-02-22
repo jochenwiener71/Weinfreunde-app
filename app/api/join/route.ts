@@ -1,6 +1,8 @@
+// app/api/join/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
-import { db } from "@/lib/firebaseAdmin";
+import { db } from "@/lib/firebase-admin";
+import { setSessionCookie } from "@/lib/session";
 
 type JoinBody = {
   slug: string;
@@ -8,13 +10,8 @@ type JoinBody = {
   pin: string;
 };
 
-function verifyPin(pin: string, storedHashRaw: string) {
+function verifyPin(pin: string, storedHash: string) {
   const salt = process.env.PIN_SALT ?? "";
-
-  const storedHash = String(storedHashRaw ?? "").trim().toLowerCase();
-
-  // Guard: storedHash muss ein gültiger SHA256 Hex-String sein (64 chars)
-  if (!/^[0-9a-f]{64}$/.test(storedHash)) return false;
 
   const computed = crypto
     .createHash("sha256")
@@ -24,39 +21,33 @@ function verifyPin(pin: string, storedHashRaw: string) {
   const a = Buffer.from(computed, "hex");
   const b = Buffer.from(storedHash, "hex");
 
-  // Muss gleich lang sein, sonst timingSafeEqual wirft
   if (a.length !== b.length) return false;
-
   return crypto.timingSafeEqual(a, b);
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as Partial<JoinBody>;
+    const body = (await req.json()) as JoinBody;
 
-    const slugRaw = String(body?.slug ?? "").trim();
-    const nameRaw = String(body?.name ?? "").trim();
-    const pinRaw = String(body?.pin ?? "").trim();
-
-    if (!slugRaw || !nameRaw || !pinRaw) {
+    if (!body?.slug || !body?.name || !body?.pin) {
       return NextResponse.json(
         { ok: false, error: "Missing slug/name/pin" },
         { status: 400 }
       );
     }
 
-    const slug = slugRaw.toLowerCase();
-    const name = nameRaw;
-    const pin = pinRaw;
+    const slug = body.slug.trim().toLowerCase();
+    const name = body.name.trim();
+    const pin = body.pin.trim();
 
-    if (!/^\d{4}$/.test(pin)) {
+    if (pin.length !== 4) {
       return NextResponse.json(
         { ok: false, error: "Invalid PIN format" },
         { status: 400 }
       );
     }
 
-    // 🔎 1) Suche über publicSlug
+    // 🔎 1) Lookup by publicSlug
     const query = await db()
       .collection("tastings")
       .where("publicSlug", "==", slug)
@@ -69,7 +60,7 @@ export async function POST(req: NextRequest) {
     if (!query.empty) {
       tastingDoc = query.docs[0];
     } else {
-      // 🔎 2) Fallback: slug als DocId
+      // 🔎 2) Fallback: slug as DocId
       const doc = await db().collection("tastings").doc(slug).get();
       if (doc.exists) tastingDoc = doc;
     }
@@ -90,8 +81,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const pinValid = verifyPin(pin, tastingData.pinHash);
-
+    const pinValid = verifyPin(pin, String(tastingData.pinHash));
     if (!pinValid) {
       return NextResponse.json(
         { ok: false, error: "Invalid PIN" },
@@ -99,7 +89,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 👤 Participant anlegen
+    // 🍷 Participant anlegen
     const participantRef = await db()
       .collection("tastings")
       .doc(tastingDoc.id)
@@ -111,21 +101,13 @@ export async function POST(req: NextRequest) {
 
     const res = NextResponse.json({ ok: true });
 
-    // 🍪 Session Cookie setzen
-    res.cookies.set(
-      "weinfreunde_session",
-      JSON.stringify({
-        tastingId: tastingDoc.id,
-        participantId: participantRef.id,
-        participantName: name,
-      }),
-      {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: process.env.NODE_ENV === "production",
-      }
-    );
+    // ✅ Session-Cookie (SIGNED) setzen -> kompatibel zu requireSession()
+    setSessionCookie(res, {
+      tastingId: tastingDoc.id,
+      participantId: participantRef.id,
+      participantName: name,
+      publicSlug: slug,
+    });
 
     return res;
   } catch (err) {
