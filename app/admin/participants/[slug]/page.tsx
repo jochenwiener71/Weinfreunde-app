@@ -1,11 +1,10 @@
 import ParticipantsClient from "./ParticipantsClient";
 
-export default async function Page({
+export default function Page({
   params,
 }: {
-  params: Promise<{ slug: string }>;
+  params: { slug: string };
 }) {
-  const { slug } = await params;
-
+  const slug = params?.slug ?? "";
   return <ParticipantsClient slug={slug} />;
 }
