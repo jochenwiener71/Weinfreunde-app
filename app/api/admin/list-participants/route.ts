@@ -9,19 +9,12 @@ import { requireAdminSecret } from "@/lib/security";
  */
 function pickName(p: any): string | null {
   const candidates = [
-    // ✅ dein altes Join-Feld
     p?.alias,
-
-    // ✅ dein neues Join-Feld (nach Fix)
     p?.name,
-
-    // weitere Varianten (nur Fallbacks)
     p?.firstName,
     p?.displayName,
     p?.participantName,
     p?.username,
-
-    // häufige verschachtelte Varianten
     p?.profile?.name,
     p?.profile?.firstName,
     p?.user?.name,
@@ -34,11 +27,18 @@ function pickName(p: any): string | null {
   return null;
 }
 
+/**
+ * ✅ FIX:
+ * Wenn kein isActive Feld existiert,
+ * gilt der Teilnehmer als aktiv.
+ */
 function pickIsActive(p: any): boolean {
   if (typeof p?.isActive === "boolean") return p.isActive;
   if (typeof p?.active === "boolean") return p.active;
   if (typeof p?.joined === "boolean") return p.joined;
-  return false;
+
+  // Default: aktiv
+  return true;
 }
 
 async function getTastingRefByPublicSlug(
@@ -56,7 +56,7 @@ async function getTastingRefByPublicSlug(
 
 export async function GET(req: Request) {
   try {
-    // 🔐 Admin-Schutz (Header: x-admin-secret)
+    // 🔐 Admin-Schutz
     requireAdminSecret(req);
 
     const { searchParams } = new URL(req.url);
@@ -86,8 +86,6 @@ export async function GET(req: Request) {
         id: d.id,
         name: pickName(data),
         isActive: pickIsActive(data),
-
-        // 🔍 optional: Debug-Infos anzeigen
         ...(debug ? { _keys: Object.keys(data) } : {}),
       };
     });
