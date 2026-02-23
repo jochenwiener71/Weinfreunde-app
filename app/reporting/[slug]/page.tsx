@@ -56,13 +56,25 @@ function wineLine(w?: WineSlotPublic) {
   return parts.length ? parts.join(" · ") : "—";
 }
 
+function safeStr(s: any) {
+  return String(s ?? "").toLowerCase().trim();
+}
+
 export default function ReportingPage({ params }: { params: { slug: string } }) {
   const slug = decodeURIComponent(params.slug || "");
 
+  const REFRESH_SECONDS = 10;
+
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [wines, setWines] = useState<WinesResponse | null>(null);
+
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+
+  // Live-refresh indicator
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const [nextRefreshIn, setNextRefreshIn] = useState<number>(REFRESH_SECONDS);
 
   // Mobile detection (portrait friendly)
   const [isNarrow, setIsNarrow] = useState(false);
@@ -74,11 +86,19 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
     return () => mq.removeEventListener?.("change", apply);
   }, []);
 
+  // Premium L2: Filters (public visible)
+  const [query, setQuery] = useState("");
+  const [onlyRated, setOnlyRated] = useState(false); // only wines with overall score
+  const [onlyWithImage, setOnlyWithImage] = useState(false);
+  const [sortMode, setSortMode] = useState<"rank" | "blind">("rank"); // rank=score desc, blind=blindNumber asc
+
+  // Smooth opening per wine
   const [expanded, setExpanded] = useState<number | null>(null);
 
-  async function load() {
-    setMsg(null);
+  async function load({ silent } = { silent: false }) {
+    if (!silent) setMsg(null);
     setLoading(true);
+    setIsRefreshing(true);
 
     try {
       const [sRes, wRes] = await Promise.all([
@@ -97,23 +117,40 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
 
       setSummary(sJson);
       setWines(wJson);
+      setLastUpdatedAt(Date.now());
+      setNextRefreshIn(REFRESH_SECONDS);
     } catch (e: any) {
-      setMsg(e?.message ?? "Load failed");
+      if (!silent) setMsg(e?.message ?? "Load failed");
       setSummary(null);
       setWines(null);
     } finally {
       setLoading(false);
+      // keep dot “alive” a moment for perceived smoothness
+      window.setTimeout(() => setIsRefreshing(false), 250);
     }
   }
 
+  // Initial + interval fetch
   useEffect(() => {
-    load();
-    const t = window.setInterval(load, 10_000);
-    return () => window.clearInterval(t);
+    load({ silent: false });
+
+    const fetchTimer = window.setInterval(() => load({ silent: true }), REFRESH_SECONDS * 1000);
+    return () => window.clearInterval(fetchTimer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
-  // Reporting IMMER sichtbar
+  // Countdown ticker
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      setNextRefreshIn((s) => {
+        if (s <= 1) return REFRESH_SECONDS;
+        return s - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  // Reporting IMMER sichtbar (bei dir aktuell)
   const revealed = true;
 
   const orderedCriteria = useMemo(() => {
@@ -128,7 +165,8 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
     return map;
   }, [wines]);
 
-  const allRanking = useMemo(() => {
+  // Base ranking rows (score desc, null last) from summary
+  const baseRanking = useMemo(() => {
     const rows = summary?.ranking?.length ? summary.ranking : summary?.rows ?? [];
     return rows
       .filter((r) => typeof r.blindNumber === "number")
@@ -141,7 +179,54 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
       });
   }, [summary]);
 
-  const top3 = useMemo(() => (summary?.ranking ?? []).slice(0, 3), [summary]);
+  const top3 = useMemo(() => baseRanking.filter((r) => typeof r.overall === "number").slice(0, 3), [baseRanking]);
+
+  // Apply filters + sort
+  const filteredRanking = useMemo(() => {
+    const q = safeStr(query);
+
+    let rows = baseRanking;
+
+    if (onlyRated) rows = rows.filter((r) => typeof r.overall === "number");
+    if (onlyWithImage) {
+      rows = rows.filter((r) => {
+        const w = wineByBlind.get(r.blindNumber);
+        return !!w?.imageUrl;
+      });
+    }
+
+    if (q) {
+      rows = rows.filter((r) => {
+        const w = wineByBlind.get(r.blindNumber);
+        const hay = [
+          `wein ${r.blindNumber}`,
+          w?.ownerName,
+          w?.winery,
+          w?.grape,
+          w?.vintage,
+        ]
+          .map((x) => safeStr(x))
+          .join(" ");
+        return hay.includes(q);
+      });
+    }
+
+    if (sortMode === "blind") {
+      rows = rows.slice().sort((a, b) => a.blindNumber - b.blindNumber);
+    } else {
+      // keep rank mode (=score desc, null last)
+      rows = rows.slice().sort((a, b) => {
+        if (a.overall == null && b.overall == null) return a.blindNumber - b.blindNumber;
+        if (a.overall == null) return 1;
+        if (b.overall == null) return -1;
+        return b.overall - a.overall;
+      });
+    }
+
+    return rows;
+  }, [baseRanking, onlyRated, onlyWithImage, query, sortMode, wineByBlind]);
+
+  const showingCount = filteredRanking.length;
 
   return (
     <div style={pageStyle}>
@@ -156,9 +241,30 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
             <p style={{ margin: "6px 0 0 0", opacity: 0.8 }}>
               Runde: <code style={codeStyle}>{slug}</code>
             </p>
+
+            {/* Live indicator */}
+            <div style={{ marginTop: 8, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, opacity: 0.95, fontSize: 12 }}>
+                <span
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: 999,
+                    background: "rgba(255,255,255,0.55)",
+                    boxShadow: isRefreshing ? "0 0 0 6px rgba(255,255,255,0.10)" : "none",
+                    transition: "box-shadow 240ms ease",
+                  }}
+                />
+                Live · nächstes Update in <b>{nextRefreshIn}s</b>
+              </span>
+
+              <span style={{ opacity: 0.75, fontSize: 12 }}>
+                {lastUpdatedAt ? `Aktualisiert: ${new Date(lastUpdatedAt).toLocaleTimeString()}` : "—"}
+              </span>
+            </div>
           </div>
 
-          <button onClick={load} style={btnStyle}>
+          <button onClick={() => load({ silent: false })} style={btnStyle}>
             ↻ Refresh
           </button>
         </header>
@@ -176,9 +282,67 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
             <section style={cardStyle}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
                 <div>
-                  Status: <b>{summary.status ?? "—"}</b> · Ratings: <b>{summary.ratingCount}</b>
+                  Status: <b>{summary.status ?? "—"}</b> · Ratings: <b>{summary.ratingCount}</b> · Weine:{" "}
+                  <b>{summary.wineCount}</b>
                 </div>
-                <div style={{ fontSize: 12, opacity: 0.75 }}>Auto-Refresh: alle 10 Sekunden</div>
+                <div style={{ fontSize: 12, opacity: 0.75 }}>Auto-Refresh: alle {REFRESH_SECONDS} Sekunden</div>
+              </div>
+            </section>
+
+            {/* FILTER BAR (Public visible) */}
+            <section style={cardStyle}>
+              <div style={{ display: "grid", gap: 10 }}>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Filter: Wein #, Weingut, Rebsorte, Owner…"
+                    style={filterInput}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                  />
+
+                  <select value={sortMode} onChange={(e) => setSortMode(e.target.value as any)} style={selectStyle}>
+                    <option value="rank">Sortierung: Ranking</option>
+                    <option value="blind">Sortierung: Blindnummer</option>
+                  </select>
+
+                  <span style={{ opacity: 0.75, fontSize: 12 }}>
+                    Treffer: <b>{showingCount}</b>
+                  </span>
+                </div>
+
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <label style={toggleStyle}>
+                    <input
+                      type="checkbox"
+                      checked={onlyRated}
+                      onChange={(e) => setOnlyRated(e.target.checked)}
+                    />
+                    Nur bewertete
+                  </label>
+
+                  <label style={toggleStyle}>
+                    <input
+                      type="checkbox"
+                      checked={onlyWithImage}
+                      onChange={(e) => setOnlyWithImage(e.target.checked)}
+                    />
+                    Nur mit Bild
+                  </label>
+
+                  <button
+                    onClick={() => {
+                      setQuery("");
+                      setOnlyRated(false);
+                      setOnlyWithImage(false);
+                      setSortMode("rank");
+                    }}
+                    style={ghostBtn}
+                  >
+                    Reset
+                  </button>
+                </div>
               </div>
             </section>
 
@@ -195,7 +359,7 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
                     return (
                       <div key={r.blindNumber} style={topRowStyle}>
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 900 }}>
+                          <div style={{ fontWeight: 950 }}>
                             #{i + 1} · Wein #{r.blindNumber} · {fmt(r.overall, 2)}
                           </div>
                           <div style={{ opacity: 0.9, marginTop: 4, wordBreak: "break-word" }}>
@@ -253,7 +417,7 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
                 <p style={{ margin: 0, opacity: 0.85 }}>Noch nicht veröffentlicht.</p>
               ) : isNarrow ? (
                 <div style={{ display: "grid", gap: 12 }}>
-                  {allRanking.map((r, i) => {
+                  {filteredRanking.map((r, i) => {
                     const w = wineByBlind.get(r.blindNumber);
                     const isOpen = expanded === r.blindNumber;
 
@@ -311,17 +475,23 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
                             </div>
                           )}
 
-                          <button
-                            onClick={() => setExpanded(isOpen ? null : r.blindNumber)}
-                            style={smallBtn}
-                          >
-                            {isOpen ? "Details schließen" : "Details"}
+                          <button onClick={() => setExpanded(isOpen ? null : r.blindNumber)} style={smallBtn}>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                              Details
+                              <span
+                                style={{
+                                  display: "inline-block",
+                                  transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
+                                  transition: "transform 220ms ease",
+                                  opacity: 0.9,
+                                }}
+                              >
+                                ▾
+                              </span>
+                            </span>
                           </button>
 
-                          <a
-                            href={`/t/${enc(slug)}/wine/${r.blindNumber}`}
-                            style={smallLinkBtn}
-                          >
+                          <a href={`/t/${enc(slug)}/wine/${r.blindNumber}`} style={smallLinkBtn}>
                             Bewertung ↗
                           </a>
                         </div>
@@ -329,12 +499,12 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
                         {/* Smooth open details */}
                         <div
                           style={{
-                            maxHeight: isOpen ? 420 : 0,
+                            maxHeight: isOpen ? 520 : 0,
                             overflow: "hidden",
-                            transition: "max-height 260ms ease",
+                            transition: "max-height 280ms ease",
                           }}
                         >
-                          <div style={{ paddingTop: isOpen ? 12 : 0 }}>
+                          <div style={{ paddingTop: isOpen ? 12 : 0, opacity: isOpen ? 1 : 0, transition: "opacity 200ms ease" }}>
                             <div style={{ fontWeight: 900, marginBottom: 8, opacity: 0.95 }}>
                               Ø je Kriterium
                             </div>
@@ -364,9 +534,8 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
                   })}
                 </div>
               ) : (
-                // Desktop table: scroll enabled, wrap enabled, minimum width
                 <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 920 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
                     <thead>
                       <tr>
                         <th style={thStyle}>#</th>
@@ -383,7 +552,7 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
                     </thead>
 
                     <tbody>
-                      {allRanking.map((r, i) => {
+                      {filteredRanking.map((r, i) => {
                         const w = wineByBlind.get(r.blindNumber);
                         return (
                           <tr key={r.blindNumber} style={{ borderTop: "1px solid rgba(255,255,255,0.1)" }}>
@@ -398,9 +567,7 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
                             ))}
 
                             <td style={tdStyle}>{w?.ownerName ?? "—"}</td>
-                            <td style={{ ...tdStyle, whiteSpace: "normal" }}>
-                              {wineLine(w)}
-                            </td>
+                            <td style={{ ...tdStyle, whiteSpace: "normal" }}>{wineLine(w)}</td>
                           </tr>
                         );
                       })}
@@ -420,10 +587,6 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
                 Join öffnen →
               </a>
             </section>
-
-            <p style={{ marginTop: 4, opacity: 0.7, fontSize: 12, color: "white" }}>
-              Mobile: Ranking als Cards · Desktop: Tabelle mit horizontalem Scroll.
-            </p>
           </>
         )}
       </main>
@@ -468,7 +631,7 @@ const wrapStyle: React.CSSProperties = {
 const headerStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
-  alignItems: "center",
+  alignItems: "flex-start",
   color: "white",
   gap: 12,
 };
@@ -493,7 +656,7 @@ const btnStyle: React.CSSProperties = {
   border: "1px solid rgba(255,255,255,0.18)",
   background: "rgba(255,255,255,0.1)",
   color: "white",
-  fontWeight: 800,
+  fontWeight: 900,
   cursor: "pointer",
   whiteSpace: "nowrap",
 };
@@ -544,7 +707,7 @@ const linkStyle: React.CSSProperties = {
   background: "rgba(255,255,255,0.1)",
   color: "white",
   textDecoration: "none",
-  fontWeight: 800,
+  fontWeight: 900,
 };
 
 const mobileCard: React.CSSProperties = {
@@ -573,7 +736,7 @@ const smallBtn: React.CSSProperties = {
   background: "rgba(255,255,255,0.10)",
   color: "white",
   cursor: "pointer",
-  fontWeight: 900,
+  fontWeight: 950,
 };
 
 const smallLinkBtn: React.CSSProperties = {
@@ -583,7 +746,7 @@ const smallLinkBtn: React.CSSProperties = {
   background: "rgba(255,255,255,0.10)",
   color: "white",
   textDecoration: "none",
-  fontWeight: 900,
+  fontWeight: 950,
 };
 
 const critChip: React.CSSProperties = {
@@ -591,4 +754,48 @@ const critChip: React.CSSProperties = {
   borderRadius: 12,
   border: "1px solid rgba(255,255,255,0.14)",
   background: "rgba(255,255,255,0.08)",
+};
+
+/* Premium L2: filter styles */
+const filterInput: React.CSSProperties = {
+  flex: "1 1 280px",
+  padding: "12px 14px",
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.18)",
+  background: "rgba(0,0,0,0.25)",
+  color: "white",
+  outline: "none",
+  fontSize: 14,
+};
+
+const selectStyle: React.CSSProperties = {
+  padding: "12px 12px",
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.18)",
+  background: "rgba(0,0,0,0.25)",
+  color: "white",
+  outline: "none",
+  fontSize: 14,
+};
+
+const toggleStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "10px 12px",
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.18)",
+  background: "rgba(255,255,255,0.06)",
+  fontWeight: 850,
+  fontSize: 13,
+};
+
+const ghostBtn: React.CSSProperties = {
+  padding: "10px 12px",
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.18)",
+  background: "rgba(255,255,255,0.08)",
+  color: "white",
+  fontWeight: 950,
+  cursor: "pointer",
 };
