@@ -86,7 +86,9 @@ export async function POST(req: Request) {
     });
 
     setSessionCookie(res, {
-      participantId: participantRef.id,
+  participantId: participantRef.id,
+  tastingId: tastingDoc.id,
+  participantName: name,
     });
 
     return res;
