@@ -1,129 +1,77 @@
-// app/api/join/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import crypto from "crypto";
-import admin from "firebase-admin";
-import { db } from "@/lib/firebaseAdmin";
-import { getSession, setSessionCookie } from "@/lib/session";
+BASE="https://weinfreunde-app.vercel.app"
+SLUG="weinfreunde-feb26"
+PIN="1234"   # <-- DEINE PIN (gemeinsam)
 
-type JoinBody = {
-  slug: string;
-  name: string;
-  pin: string;
-};
+# Kriterien-IDs (aus deinem summary JSON)
+C1="99byDuwCbHZdbGmOTxBO"  # Nase
+C2="Xugdv501ZlvYDEy5CqkP"  # Gaumen
+C3="PF3YPc4gzkQD1jIUXcAK"  # Balance
+C4="ng8RSlmVlzG9LLzKqWc6"  # Gesamteindruck
 
-export const runtime = "nodejs";
+# welche Weine sollen bewertet werden (hier nur 1 und 5 zum schnellen Check)
+WINES=(1 5)
 
-function normalizeNameKey(name: string) {
-  return name.trim().toLowerCase();
-}
+echo "== Precheck: summary vorher =="
+curl -sS "$BASE/api/tasting/summary?publicSlug=$SLUG"
+echo
+echo
 
-function verifyPin(pin: string, storedHash: string) {
-  const salt = process.env.PIN_SALT ?? "";
-  const computed = crypto.createHash("sha256").update(`${pin}:${salt}`).digest("hex");
+for i in 1 2 3 4 5 6 7 8; do
+  JAR="cookies_user${i}.txt"
+  NAME="Tester${i}"
 
-  const a = Buffer.from(computed, "hex");
-  const b = Buffer.from(storedHash, "hex");
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
-}
+  echo "=============================="
+  echo "USER $i: JOIN ($NAME)"
+  echo "=============================="
 
-async function getTastingBySlug(slug: string) {
-  const q = await db().collection("tastings").where("publicSlug", "==", slug).limit(1).get();
-  if (!q.empty) return q.docs[0];
-  return null;
-}
+  curl -sS \
+    -c "$JAR" \
+    -H "content-type: application/json" \
+    -X POST "$BASE/api/join" \
+    --data "{\"slug\":\"$SLUG\",\"name\":\"$NAME\",\"pin\":\"$PIN\"}"
+  echo
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = (await req.json().catch(() => ({}))) as JoinBody;
+  echo "USER $i: SESSION CHECK"
+  curl -sS -b "$JAR" "$BASE/api/session/check"
+  echo
 
-    const slug = String(body?.slug ?? "").trim().toLowerCase();
-    const name = String(body?.name ?? "").trim();
-    const pin = String(body?.pin ?? "").trim();
+  for W in "${WINES[@]}"; do
+    # deterministische Scores je User + Wein (1..10)
+    S1=$(( (i + W) % 10 + 1 ))
+    S2=$(( (i + W + 2) % 10 + 1 ))
+    S3=$(( (i + W + 4) % 10 + 1 ))
+    S4=$(( (i + W + 6) % 10 + 1 ))
 
-    if (!slug || !name || !pin) {
-      return NextResponse.json({ ok: false, error: "Missing slug/name/pin" }, { status: 400 });
-    }
-    if (pin.length !== 4) {
-      return NextResponse.json({ ok: false, error: "Invalid PIN format" }, { status: 400 });
-    }
+    echo
+    echo "USER $i: SAVE rating wine=$W  (scores: $S1,$S2,$S3,$S4)"
 
-    const tastingDoc = await getTastingBySlug(slug);
-    if (!tastingDoc) {
-      return NextResponse.json({ ok: false, error: "Tasting not found" }, { status: 404 });
-    }
+    curl -sS \
+      -b "$JAR" \
+      -H "content-type: application/json" \
+      -X POST "$BASE/api/rating/save" \
+      --data "{
+        \"slug\":\"$SLUG\",
+        \"blindNumber\":$W,
+        \"scores\":{
+          \"$C1\":$S1,
+          \"$C2\":$S2,
+          \"$C3\":$S3,
+          \"$C4\":$S4
+        },
+        \"comment\":\"SimUser $i wine $W\"
+      }"
+    echo
 
-    const tasting = tastingDoc.data() as any;
+    echo "USER $i: GET rating wine=$W"
+    curl -sS -b "$JAR" "$BASE/api/rating/get?slug=$SLUG&blindNumber=$W"
+    echo
+  done
 
-    if (!tasting?.pinHash) {
-      return NextResponse.json({ ok: false, error: "Tasting PIN not configured" }, { status: 500 });
-    }
+  echo
+  echo "------------------------------"
+  echo
+done
 
-    // ✅ Wenn bereits eingeloggt und Session gehört zu diesem Tasting → kein neuer Participant
-    const existingSession = getSession();
-    if (existingSession?.tastingId === tastingDoc.id) {
-      return NextResponse.json({ ok: true, reused: true, alreadyLoggedIn: true });
-    }
-
-    // ✅ PIN validieren (Tasting-PIN)
-    const pinValid = verifyPin(pin, String(tasting.pinHash));
-    if (!pinValid) {
-      return NextResponse.json({ ok: false, error: "Invalid PIN" }, { status: 403 });
-    }
-
-    // ✅ Participant wiederverwenden statt immer add()
-    const nameKey = normalizeNameKey(name);
-
-    const participantsRef = tastingDoc.ref.collection("participants");
-
-    let participantId: string | null = null;
-    let participantName: string = name;
-
-    // 1) Suche nach nameKey
-    const pq = await participantsRef.where("nameKey", "==", nameKey).limit(1).get();
-    if (!pq.empty) {
-      participantId = pq.docs[0].id;
-      const p = pq.docs[0].data() as any;
-      participantName = String(p?.name ?? name);
-    } else {
-      // 2) Fallback: Suche nach name (falls ältere Daten ohne nameKey)
-      const pq2 = await participantsRef.where("name", "==", name).limit(1).get();
-      if (!pq2.empty) {
-        participantId = pq2.docs[0].id;
-        const p = pq2.docs[0].data() as any;
-        participantName = String(p?.name ?? name);
-
-        // nameKey nachziehen
-        await participantsRef.doc(participantId).set(
-          { nameKey, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
-          { merge: true }
-        );
-      } else {
-        // 3) Neu anlegen
-        const created = await participantsRef.add({
-          name,
-          nameKey,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          isActive: true,
-        });
-        participantId = created.id;
-      }
-    }
-
-    // ✅ Session Cookie setzen (wf_session)
-    const res = NextResponse.json({ ok: true, participantId, reused: pq.empty ? false : true });
-
-    setSessionCookie(res, {
-      tastingId: tastingDoc.id,
-      participantId: String(participantId),
-      participantName,
-      publicSlug: slug,
-    });
-
-    return res;
-  } catch (err) {
-    console.error("[JOIN ERROR]", err);
-    return NextResponse.json({ ok: false, error: "Server error" }, { status: 500 });
-  }
-}
+echo "== Summary nach Simulation =="
+curl -sS "$BASE/api/tasting/summary?publicSlug=$SLUG"
+echo
