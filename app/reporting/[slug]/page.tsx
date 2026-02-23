@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type SummaryRow = {
   blindNumber: number;
@@ -28,7 +28,6 @@ type WineSlotPublic = {
   winery: string | null;
   grape: string | null;
   vintage: string | null;
-  displayName?: string | null;
   imageUrl?: string | null;
   imagePath?: string | null;
 };
@@ -46,39 +45,15 @@ function enc(s: string) {
   return encodeURIComponent(s);
 }
 
-function clamp(n: number, a: number, b: number) {
-  return Math.max(a, Math.min(b, n));
-}
-
-/**
- * ✅ Robust: unterstützt perCrit by criterionId ODER by label
- */
-function getCritScore(row: SummaryRow, critId: string, critLabel: string): number | null {
-  const v1 = row.perCrit?.[critId];
-  if (typeof v1 === "number") return v1;
-
-  const v2 = row.perCrit?.[critLabel];
-  if (typeof v2 === "number") return v2;
-
-  return null;
-}
-
-function scoreText(v: number | null, digits = 2) {
-  if (v == null || typeof v !== "number") return "—";
+function fmt(v: number | null, digits = 2) {
+  if (typeof v !== "number") return "—";
   return v.toFixed(digits);
 }
 
-function emojiRank(i: number) {
-  if (i === 0) return "🥇";
-  if (i === 1) return "🥈";
-  if (i === 2) return "🥉";
-  return "🏅";
-}
-
-function wineTitle(w: WineSlotPublic | undefined, blindNumber: number) {
-  if (!w) return `Wein #${blindNumber}`;
-  const parts = [w.winery, w.displayName, w.grape, w.vintage].filter(Boolean);
-  return parts.length ? parts.join(" · ") : `Wein #${blindNumber}`;
+function wineLine(w?: WineSlotPublic) {
+  if (!w) return "—";
+  const parts = [w.winery, w.grape, w.vintage].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "—";
 }
 
 export default function ReportingPage({ params }: { params: { slug: string } }) {
@@ -88,7 +63,18 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
   const [wines, setWines] = useState<WinesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
-  const [expandedBlind, setExpandedBlind] = useState<number | null>(null);
+
+  // Mobile detection (portrait friendly)
+  const [isNarrow, setIsNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 820px)");
+    const apply = () => setIsNarrow(!!mq.matches);
+    apply();
+    mq.addEventListener?.("change", apply);
+    return () => mq.removeEventListener?.("change", apply);
+  }, []);
+
+  const [expanded, setExpanded] = useState<number | null>(null);
 
   async function load() {
     setMsg(null);
@@ -127,6 +113,9 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
+  // Reporting IMMER sichtbar
+  const revealed = true;
+
   const orderedCriteria = useMemo(() => {
     return (summary?.criteria ?? []).slice().sort((a, b) => a.order - b.order);
   }, [summary]);
@@ -139,13 +128,12 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
     return map;
   }, [wines]);
 
-  const ranking = useMemo(() => {
+  const allRanking = useMemo(() => {
     const rows = summary?.ranking?.length ? summary.ranking : summary?.rows ?? [];
     return rows
-      .filter((r) => Number.isFinite(r.blindNumber))
+      .filter((r) => typeof r.blindNumber === "number")
       .slice()
       .sort((a, b) => {
-        // primär: overall desc, nulls zuletzt
         if (a.overall == null && b.overall == null) return a.blindNumber - b.blindNumber;
         if (a.overall == null) return 1;
         if (b.overall == null) return -1;
@@ -153,13 +141,7 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
       });
   }, [summary]);
 
-  const top3 = useMemo(() => ranking.slice(0, 3), [ranking]);
-
-  // Für kleine Bars (UI)
-  const overallMax = useMemo(() => {
-    const vals = ranking.map((r) => (typeof r.overall === "number" ? r.overall : 0));
-    return Math.max(10, ...vals); // falls Skala unbekannt: mindestens 10
-  }, [ranking]);
+  const top3 = useMemo(() => (summary?.ranking ?? []).slice(0, 3), [summary]);
 
   return (
     <div style={pageStyle}>
@@ -167,136 +149,95 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
       <div style={bgImg} />
       <div style={bgOverlay} />
 
-      <main style={wrap}>
-        <header style={header}>
+      <main style={wrapStyle}>
+        <header style={headerStyle}>
           <div>
-            <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-              <h1 style={{ margin: 0, fontSize: 26 }}>🍷 Reporting</h1>
-              <span style={chip}>Live</span>
-              <span style={{ opacity: 0.8, fontSize: 13 }}>
-                Runde: <code style={code}>{slug}</code>
-              </span>
-            </div>
-
-            <div style={{ marginTop: 6, opacity: 0.8, fontSize: 13 }}>
-              Auto-Refresh: alle 10 Sekunden · {summary ? `Ratings: ${summary.ratingCount}` : "—"}
-            </div>
+            <h1 style={{ margin: 0, fontSize: isNarrow ? 22 : 26 }}>🍷 Reporting</h1>
+            <p style={{ margin: "6px 0 0 0", opacity: 0.8 }}>
+              Runde: <code style={codeStyle}>{slug}</code>
+            </p>
           </div>
 
-          <button onClick={load} style={btn} disabled={loading}>
-            {loading ? "Lade…" : "↻ Refresh"}
+          <button onClick={load} style={btnStyle}>
+            ↻ Refresh
           </button>
         </header>
 
-        {msg && <div style={errorCard}>{msg}</div>}
+        {msg && <div style={errorStyle}>{msg}</div>}
 
-        {!summary && loading && (
-          <div style={card}>
-            <div style={{ opacity: 0.85 }}>Lade Daten…</div>
-            <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-              <div style={skeleton} />
-              <div style={skeleton} />
-              <div style={skeleton} />
-            </div>
+        {loading && !summary && (
+          <div style={cardStyle}>
+            <p style={{ margin: 0, opacity: 0.85 }}>Lade…</p>
           </div>
         )}
 
         {summary && (
           <>
-            {/* KPI */}
-            <section style={kpiGrid}>
-              <div style={kpiCard}>
-                <div style={kpiLabel}>Status</div>
-                <div style={kpiValue}>{summary.status ?? "—"}</div>
-              </div>
-              <div style={kpiCard}>
-                <div style={kpiLabel}>Weine</div>
-                <div style={kpiValue}>{summary.wineCount}</div>
-              </div>
-              <div style={kpiCard}>
-                <div style={kpiLabel}>Ratings</div>
-                <div style={kpiValue}>{summary.ratingCount}</div>
-              </div>
-              <div style={kpiCard}>
-                <div style={kpiLabel}>Kriterien</div>
-                <div style={kpiValue}>{orderedCriteria.length}</div>
+            <section style={cardStyle}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                <div>
+                  Status: <b>{summary.status ?? "—"}</b> · Ratings: <b>{summary.ratingCount}</b>
+                </div>
+                <div style={{ fontSize: 12, opacity: 0.75 }}>Auto-Refresh: alle 10 Sekunden</div>
               </div>
             </section>
 
-            {/* Top 3 */}
-            <section style={card}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                <h2 style={h2}>🏆 Top 3</h2>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>
-                  Werte live aus Ø-Scores · null = noch keine Ratings
-                </div>
-              </div>
+            {/* TOP 3 */}
+            <section style={cardStyle}>
+              <h2 style={h2Style}>🏆 Top 3</h2>
 
-              {!top3.length ? (
-                <div style={{ opacity: 0.85 }}>Noch keine Auswertung verfügbar.</div>
+              {top3.length === 0 ? (
+                <p style={{ margin: 0, opacity: 0.85 }}>Noch keine Auswertung verfügbar.</p>
               ) : (
-                <div style={podium}>
-                  {top3.map((r, idx) => {
+                <div style={{ display: "grid", gap: 12 }}>
+                  {top3.map((r, i) => {
                     const w = wineByBlind.get(r.blindNumber);
-                    const isWinner = idx === 0;
                     return (
-                      <div key={r.blindNumber} style={{ ...podiumCard, ...(isWinner ? podiumWinner : {}) }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                          <div>
-                            <div style={{ fontWeight: 950, fontSize: 14 }}>
-                              {emojiRank(idx)} Platz {idx + 1}
-                            </div>
-                            <div style={{ marginTop: 6, fontWeight: 900 }}>
-                              Wein #{r.blindNumber}
-                            </div>
-                            <div style={{ marginTop: 4, opacity: 0.9, fontSize: 13 }}>
-                              {wineTitle(w, r.blindNumber)}
-                            </div>
-                            <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
-                              Mitgebracht von: <strong>{w?.ownerName ?? "—"}</strong>
-                            </div>
+                      <div key={r.blindNumber} style={topRowStyle}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 900 }}>
+                            #{i + 1} · Wein #{r.blindNumber} · {fmt(r.overall, 2)}
                           </div>
-
-                          <div style={{ textAlign: "right" }}>
-                            <div style={{ opacity: 0.75, fontSize: 12 }}>Ø Score</div>
-                            <div style={bigBadge}>{scoreText(r.overall, 2)}</div>
+                          <div style={{ opacity: 0.9, marginTop: 4, wordBreak: "break-word" }}>
+                            <b>{w?.winery ?? "—"}</b>
+                            {w?.grape ? ` · ${w.grape}` : ""}
+                            {w?.vintage ? ` · ${w.vintage}` : ""}
+                          </div>
+                          <div style={{ fontSize: 13, opacity: 0.8, marginTop: 4 }}>
+                            Mitgebracht von: {w?.ownerName ?? "—"}
                           </div>
                         </div>
 
-                        {/* mini criteria chips */}
-                        <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 8 }}>
-                          {orderedCriteria.slice(0, 3).map((c) => {
-                            const v = getCritScore(r, c.id, c.label);
-                            return (
-                              <div key={c.id} style={pill}>
-                                <span style={{ opacity: 0.8 }}>{c.label}</span>
-                                <span style={{ fontWeight: 950 }}>{v == null ? "—" : v.toFixed(1)}</span>
-                              </div>
-                            );
-                          })}
-                          {orderedCriteria.length > 3 ? (
-                            <div style={{ ...pill, opacity: 0.75 }}>+{orderedCriteria.length - 3} Kriterien</div>
-                          ) : null}
-                        </div>
-
-                        {/* image */}
-                        <div style={{ marginTop: 12 }}>
-                          {w?.imageUrl ? (
-                            <img
-                              src={w.imageUrl}
-                              alt="Flasche"
-                              style={{
-                                width: "100%",
-                                height: 180,
-                                objectFit: "cover",
-                                borderRadius: 14,
-                                border: "1px solid rgba(255,255,255,0.14)",
-                              }}
-                            />
-                          ) : (
-                            <div style={imgPlaceholder}>Kein Bild</div>
-                          )}
-                        </div>
+                        {w?.imageUrl ? (
+                          <img
+                            src={w.imageUrl}
+                            alt="Flasche"
+                            style={{
+                              width: 64,
+                              height: 96,
+                              objectFit: "cover",
+                              borderRadius: 12,
+                              border: "1px solid rgba(255,255,255,0.16)",
+                              flex: "0 0 auto",
+                            }}
+                          />
+                        ) : (
+                          <div
+                            style={{
+                              width: 64,
+                              height: 96,
+                              borderRadius: 12,
+                              border: "1px solid rgba(255,255,255,0.16)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              opacity: 0.6,
+                              flex: "0 0 auto",
+                            }}
+                          >
+                            —
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -304,133 +245,185 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
               )}
             </section>
 
-            {/* Ranking Table */}
-            <section style={card}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                <h2 style={h2}>📊 Ranking</h2>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>
-                  Tap “Details” für Kriterien-Ø + Bild
-                </div>
-              </div>
+            {/* RANKING: Mobile = Cards, Desktop = Table */}
+            <section style={cardStyle}>
+              <h2 style={h2Style}>📊 Ranking</h2>
 
-              <div style={{ overflowX: "auto", marginTop: 10 }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
-                  <thead>
-                    <tr>
-                      <th style={th}>#</th>
-                      <th style={th}>Wein</th>
-                      <th style={thRight}>Ø</th>
-                      <th style={th}>Bar</th>
-                      <th style={th}>Aktion</th>
-                    </tr>
-                  </thead>
+              {!revealed ? (
+                <p style={{ margin: 0, opacity: 0.85 }}>Noch nicht veröffentlicht.</p>
+              ) : isNarrow ? (
+                <div style={{ display: "grid", gap: 12 }}>
+                  {allRanking.map((r, i) => {
+                    const w = wineByBlind.get(r.blindNumber);
+                    const isOpen = expanded === r.blindNumber;
 
-                  <tbody>
-                    {ranking.map((r, i) => {
-                      const w = wineByBlind.get(r.blindNumber);
-                      const open = expandedBlind === r.blindNumber;
-                      const ov = typeof r.overall === "number" ? r.overall : null;
-                      const pct = ov == null ? 0 : clamp((ov / overallMax) * 100, 0, 100);
+                    return (
+                      <div key={r.blindNumber} style={mobileCard}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontWeight: 950, fontSize: 14 }}>
+                              #{i + 1} · Wein #{r.blindNumber}
+                            </div>
+                            <div style={{ opacity: 0.9, marginTop: 4, wordBreak: "break-word" }}>
+                              {wineLine(w)}
+                            </div>
+                            <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
+                              Owner: {w?.ownerName ?? "—"}
+                            </div>
+                          </div>
 
-                      return (
-                        <React.Fragment key={r.blindNumber}>
-                          <tr style={{ borderTop: "1px solid rgba(255,255,255,0.10)" }}>
-                            <td style={td}>{i + 1}</td>
+                          <div style={{ textAlign: "right", flex: "0 0 auto" }}>
+                            <div style={{ fontSize: 12, opacity: 0.7 }}>Overall</div>
+                            <div style={scorePill}>{fmt(r.overall, 2)}</div>
+                          </div>
+                        </div>
 
-                            <td style={td}>
-                              <div style={{ fontWeight: 950, display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-                                <span>Wein #{r.blindNumber}</span>
-                                <span style={{ opacity: 0.85, fontSize: 13 }}>
-                                  {wineTitle(w, r.blindNumber)}
-                                </span>
-                              </div>
-                              <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
-                                Owner: <strong>{w?.ownerName ?? "—"}</strong>
-                              </div>
-                            </td>
+                        {/* Image + actions */}
+                        <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "center" }}>
+                          {w?.imageUrl ? (
+                            <img
+                              src={w.imageUrl}
+                              alt="Flasche"
+                              style={{
+                                width: 54,
+                                height: 78,
+                                objectFit: "cover",
+                                borderRadius: 12,
+                                border: "1px solid rgba(255,255,255,0.16)",
+                                flex: "0 0 auto",
+                              }}
+                            />
+                          ) : (
+                            <div
+                              style={{
+                                width: 54,
+                                height: 78,
+                                borderRadius: 12,
+                                border: "1px solid rgba(255,255,255,0.16)",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                opacity: 0.6,
+                                flex: "0 0 auto",
+                              }}
+                            >
+                              —
+                            </div>
+                          )}
 
-                            <td style={tdRight}>
-                              <span style={badge}>{scoreText(ov, 2)}</span>
-                            </td>
+                          <button
+                            onClick={() => setExpanded(isOpen ? null : r.blindNumber)}
+                            style={smallBtn}
+                          >
+                            {isOpen ? "Details schließen" : "Details"}
+                          </button>
 
-                            <td style={td}>
-                              <div style={barWrap}>
-                                <div style={{ ...barFill, width: `${pct}%` }} />
-                              </div>
-                            </td>
+                          <a
+                            href={`/t/${enc(slug)}/wine/${r.blindNumber}`}
+                            style={smallLinkBtn}
+                          >
+                            Bewertung ↗
+                          </a>
+                        </div>
 
-                            <td style={td}>
-                              <button style={miniBtn} onClick={() => setExpandedBlind(open ? null : r.blindNumber)}>
-                                {open ? "Details schließen" : "Details"}
-                              </button>
-                              <a
-                                href={`/t/${enc(slug)}/wine/${r.blindNumber}`}
-                                style={miniLink}
-                              >
-                                Bewertung ↗
-                              </a>
-                            </td>
-                          </tr>
+                        {/* Smooth open details */}
+                        <div
+                          style={{
+                            maxHeight: isOpen ? 420 : 0,
+                            overflow: "hidden",
+                            transition: "max-height 260ms ease",
+                          }}
+                        >
+                          <div style={{ paddingTop: isOpen ? 12 : 0 }}>
+                            <div style={{ fontWeight: 900, marginBottom: 8, opacity: 0.95 }}>
+                              Ø je Kriterium
+                            </div>
 
-                          {open && (
-                            <tr style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                              <td style={{ ...td, paddingTop: 0 }} />
-                              <td colSpan={4} style={{ ...td, paddingTop: 0 }}>
-                                <div style={detailBox}>
-                                  <div style={{ display: "grid", gridTemplateColumns: "1fr 260px", gap: 12 }}>
-                                    <div>
-                                      <div style={{ fontWeight: 950, marginBottom: 10 }}>Ø je Kriterium</div>
-                                      <div style={{ display: "grid", gap: 8 }}>
-                                        {orderedCriteria.map((c) => {
-                                          const v = getCritScore(r, c.id, c.label);
-                                          return (
-                                            <div
-                                              key={c.id}
-                                              style={{ display: "flex", justifyContent: "space-between", gap: 12 }}
-                                            >
-                                              <div style={{ opacity: 0.9 }}>{c.label}</div>
-                                              <div style={{ fontVariantNumeric: "tabular-nums" }}>
-                                                {v == null ? <span style={{ opacity: 0.6 }}>—</span> : <strong>{v.toFixed(2)}</strong>}
-                                              </div>
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    </div>
-
-                                    <div>
-                                      {w?.imageUrl ? (
-                                        <img
-                                          src={w.imageUrl}
-                                          alt="Flasche"
-                                          style={{
-                                            width: "100%",
-                                            height: 220,
-                                            objectFit: "cover",
-                                            borderRadius: 14,
-                                            border: "1px solid rgba(255,255,255,0.14)",
-                                          }}
-                                        />
-                                      ) : (
-                                        <div style={{ ...imgPlaceholder, height: 220 }}>Kein Bild</div>
-                                      )}
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                              {orderedCriteria.map((c) => {
+                                const v = r.perCrit?.[c.id] ?? null;
+                                return (
+                                  <div key={c.id} style={critChip}>
+                                    <div style={{ opacity: 0.9, fontSize: 12 }}>{c.label}</div>
+                                    <div style={{ fontWeight: 950, fontVariantNumeric: "tabular-nums" }}>
+                                      {fmt(v, 2)}
                                     </div>
                                   </div>
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                                );
+                              })}
+                            </div>
 
-              <div style={{ marginTop: 12, opacity: 0.75, fontSize: 12 }}>
-                Hinweis: Das Reporting ist “public”, zeigt aber nur Aggregation (Ø pro Wein).
-              </div>
+                            <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
+                              Weingut: {w?.winery ?? "—"}
+                              {w?.vintage ? ` · ${w.vintage}` : ""}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                // Desktop table: scroll enabled, wrap enabled, minimum width
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 920 }}>
+                    <thead>
+                      <tr>
+                        <th style={thStyle}>#</th>
+                        <th style={thStyle}>Wein</th>
+                        <th style={thStyle}>Overall</th>
+                        {orderedCriteria.map((c) => (
+                          <th key={c.id} style={thStyle}>
+                            {c.label}
+                          </th>
+                        ))}
+                        <th style={thStyle}>Owner</th>
+                        <th style={thStyle}>Weingut</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {allRanking.map((r, i) => {
+                        const w = wineByBlind.get(r.blindNumber);
+                        return (
+                          <tr key={r.blindNumber} style={{ borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+                            <td style={tdStyle}>{i + 1}</td>
+                            <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>#{r.blindNumber}</td>
+                            <td style={tdStyle}>{fmt(r.overall, 2)}</td>
+
+                            {orderedCriteria.map((c) => (
+                              <td key={c.id} style={tdStyle}>
+                                {fmt(r.perCrit?.[c.id] ?? null, 2)}
+                              </td>
+                            ))}
+
+                            <td style={tdStyle}>{w?.ownerName ?? "—"}</td>
+                            <td style={{ ...tdStyle, whiteSpace: "normal" }}>
+                              {wineLine(w)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </section>
+
+            {/* LINKS */}
+            <section style={{ ...cardStyle, display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <a href={`/t/${enc(slug)}`} style={linkStyle}>
+                Teilnehmer-Übersicht →
+              </a>
+
+              <a href={`/join?slug=${enc(slug)}`} style={linkStyle} target="_blank" rel="noreferrer">
+                Join öffnen →
+              </a>
+            </section>
+
+            <p style={{ marginTop: 4, opacity: 0.7, fontSize: 12, color: "white" }}>
+              Mobile: Ranking als Cards · Desktop: Tabelle mit horizontalem Scroll.
+            </p>
           </>
         )}
       </main>
@@ -438,13 +431,12 @@ export default function ReportingPage({ params }: { params: { slug: string } }) 
   );
 }
 
-/* ===== Styles (Premium Level 2) ===== */
-
+/* styles */
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
   position: "relative",
   overflow: "hidden",
-  fontFamily: "system-ui, -apple-system, BlinkMacSystemFont",
+  fontFamily: "system-ui",
 };
 
 const bgImg: React.CSSProperties = {
@@ -460,208 +452,121 @@ const bgImg: React.CSSProperties = {
 const bgOverlay: React.CSSProperties = {
   position: "absolute",
   inset: 0,
-  background:
-    "linear-gradient(180deg, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.78) 55%, rgba(0,0,0,0.92) 100%)",
+  background: "linear-gradient(180deg, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.78) 60%, rgba(0,0,0,0.9) 100%)",
 };
 
-const wrap: React.CSSProperties = {
+const wrapStyle: React.CSSProperties = {
   position: "relative",
   zIndex: 1,
-  maxWidth: 1080,
+  maxWidth: 980,
   margin: "0 auto",
-  padding: 20,
+  padding: 16,
   display: "grid",
   gap: 14,
 };
 
-const header: React.CSSProperties = {
+const headerStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
-  alignItems: "flex-start",
-  gap: 12,
+  alignItems: "center",
   color: "white",
-  flexWrap: "wrap",
+  gap: 12,
 };
 
-const card: React.CSSProperties = {
-  background: "rgba(20,20,20,0.74)",
+const cardStyle: React.CSSProperties = {
+  background: "rgba(20,20,20,0.75)",
   backdropFilter: "blur(6px)",
   border: "1px solid rgba(255,255,255,0.14)",
   borderRadius: 16,
-  padding: 18,
+  padding: 16,
   color: "white",
-  boxShadow: "0 18px 50px rgba(0,0,0,0.45)",
 };
 
-const errorCard: React.CSSProperties = {
-  ...card,
+const h2Style: React.CSSProperties = {
+  margin: "0 0 12px 0",
+  fontSize: 16,
+};
+
+const btnStyle: React.CSSProperties = {
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: "1px solid rgba(255,255,255,0.18)",
+  background: "rgba(255,255,255,0.1)",
+  color: "white",
+  fontWeight: 800,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+};
+
+const errorStyle: React.CSSProperties = {
+  ...cardStyle,
   borderColor: "rgba(255,80,80,0.5)",
   color: "#ffb4b4",
 };
 
-const chip: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  padding: "3px 8px",
-  borderRadius: 999,
-  border: "1px solid rgba(255,255,255,0.18)",
-  background: "rgba(255,255,255,0.10)",
-  fontSize: 12,
-  fontWeight: 800,
-};
-
-const code: React.CSSProperties = {
+const codeStyle: React.CSSProperties = {
   padding: "2px 6px",
   borderRadius: 6,
-  background: "rgba(255,255,255,0.10)",
-  border: "1px solid rgba(255,255,255,0.12)",
+  background: "rgba(255,255,255,0.1)",
 };
 
-const btn: React.CSSProperties = {
-  padding: "10px 12px",
-  borderRadius: 10,
-  border: "1px solid rgba(255,255,255,0.18)",
-  background: "rgba(255,255,255,0.10)",
-  color: "white",
-  fontWeight: 900,
-  cursor: "pointer",
-};
-
-const skeleton: React.CSSProperties = {
-  height: 14,
-  borderRadius: 999,
-  background: "rgba(255,255,255,0.10)",
-  border: "1px solid rgba(255,255,255,0.10)",
-};
-
-const kpiGrid: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+const topRowStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
   gap: 12,
-};
-
-const kpiCard: React.CSSProperties = {
-  ...card,
   padding: 14,
-};
-
-const kpiLabel: React.CSSProperties = {
-  opacity: 0.75,
-  fontSize: 12,
-};
-
-const kpiValue: React.CSSProperties = {
-  marginTop: 6,
-  fontSize: 20,
-  fontWeight: 950,
-  letterSpacing: 0.2,
-};
-
-const h2: React.CSSProperties = {
-  margin: 0,
-  fontSize: 16,
-  fontWeight: 950,
-};
-
-const podium: React.CSSProperties = {
-  marginTop: 12,
-  display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-  gap: 12,
-};
-
-const podiumCard: React.CSSProperties = {
-  padding: 14,
-  borderRadius: 16,
-  background: "rgba(255,255,255,0.08)",
-  border: "1px solid rgba(255,255,255,0.14)",
-};
-
-const podiumWinner: React.CSSProperties = {
-  background: "rgba(255,255,255,0.12)",
-  border: "1px solid rgba(255,255,255,0.22)",
-  boxShadow: "0 14px 40px rgba(0,0,0,0.35)",
-};
-
-const bigBadge: React.CSSProperties = {
-  marginTop: 6,
-  display: "inline-block",
-  padding: "10px 12px",
-  borderRadius: 12,
-  background: "rgba(255,255,255,0.14)",
-  border: "1px solid rgba(255,255,255,0.18)",
-  fontWeight: 950,
-  fontSize: 22,
-  fontVariantNumeric: "tabular-nums",
-};
-
-const pill: React.CSSProperties = {
-  padding: "6px 10px",
-  borderRadius: 999,
-  border: "1px solid rgba(255,255,255,0.14)",
-  background: "rgba(255,255,255,0.08)",
-  fontSize: 12,
-  display: "inline-flex",
-  gap: 8,
-  alignItems: "baseline",
-};
-
-const imgPlaceholder: React.CSSProperties = {
-  width: "100%",
-  height: 180,
   borderRadius: 14,
   border: "1px solid rgba(255,255,255,0.14)",
   background: "rgba(255,255,255,0.06)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  opacity: 0.7,
 };
 
-const th: React.CSSProperties = {
+const thStyle: React.CSSProperties = {
   textAlign: "left",
-  padding: "10px 10px",
-  borderBottom: "1px solid rgba(255,255,255,0.16)",
+  padding: 10,
   fontSize: 12,
-  opacity: 0.9,
+  borderBottom: "1px solid rgba(255,255,255,0.14)",
+  whiteSpace: "nowrap",
 };
 
-const thRight: React.CSSProperties = { ...th, textAlign: "right" };
-
-const td: React.CSSProperties = {
-  padding: "12px 10px",
+const tdStyle: React.CSSProperties = {
+  padding: 10,
+  fontSize: 13,
   verticalAlign: "top",
-  fontSize: 14,
+  fontVariantNumeric: "tabular-nums",
 };
 
-const tdRight: React.CSSProperties = { ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" };
-
-const badge: React.CSSProperties = {
+const linkStyle: React.CSSProperties = {
   display: "inline-block",
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: "1px solid rgba(255,255,255,0.18)",
+  background: "rgba(255,255,255,0.1)",
+  color: "white",
+  textDecoration: "none",
+  fontWeight: 800,
+};
+
+const mobileCard: React.CSSProperties = {
+  padding: 14,
+  borderRadius: 14,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.06)",
+};
+
+const scorePill: React.CSSProperties = {
+  display: "inline-block",
+  marginTop: 6,
   padding: "6px 10px",
   borderRadius: 999,
   border: "1px solid rgba(255,255,255,0.16)",
   background: "rgba(255,255,255,0.10)",
   fontWeight: 950,
-  minWidth: 76,
+  minWidth: 70,
   textAlign: "right",
 };
 
-const barWrap: React.CSSProperties = {
-  height: 10,
-  borderRadius: 999,
-  border: "1px solid rgba(255,255,255,0.14)",
-  background: "rgba(255,255,255,0.08)",
-  overflow: "hidden",
-};
-
-const barFill: React.CSSProperties = {
-  height: "100%",
-  borderRadius: 999,
-  background: "linear-gradient(90deg, rgba(192,57,43,0.9), rgba(142,14,0,0.95))",
-};
-
-const miniBtn: React.CSSProperties = {
+const smallBtn: React.CSSProperties = {
   padding: "8px 10px",
   borderRadius: 10,
   border: "1px solid rgba(255,255,255,0.18)",
@@ -669,20 +574,21 @@ const miniBtn: React.CSSProperties = {
   color: "white",
   cursor: "pointer",
   fontWeight: 900,
-  marginRight: 10,
 };
 
-const miniLink: React.CSSProperties = {
+const smallLinkBtn: React.CSSProperties = {
+  padding: "8px 10px",
+  borderRadius: 10,
+  border: "1px solid rgba(255,255,255,0.18)",
+  background: "rgba(255,255,255,0.10)",
   color: "white",
-  opacity: 0.9,
-  textDecoration: "underline",
+  textDecoration: "none",
   fontWeight: 900,
 };
 
-const detailBox: React.CSSProperties = {
-  marginTop: 6,
-  padding: 12,
-  borderRadius: 14,
-  background: "rgba(255,255,255,0.08)",
+const critChip: React.CSSProperties = {
+  padding: 10,
+  borderRadius: 12,
   border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.08)",
 };
