@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import admin from "firebase-admin";
 import crypto from "crypto";
 import { db } from "@/lib/firebaseAdmin";
-import { setSessionCookie, requireSessionOptional } from "@/lib/session";
+import { setSessionCookie, requireSession } from "@/lib/session";
 
 function verifyPin(pin: string, storedHash: string) {
   const salt = process.env.PIN_SALT ?? "";
@@ -25,51 +25,22 @@ export async function POST(req: Request) {
     const pin = String(body.pin ?? "").trim();
 
     if (!slug || !name || !pin) {
-      return NextResponse.json(
-        { ok: false, error: "Missing slug/name/pin" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "Missing slug/name/pin" }, { status: 400 });
     }
 
     if (pin.length !== 4) {
-      return NextResponse.json(
-        { ok: false, error: "Invalid PIN format" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "Invalid PIN format" }, { status: 400 });
     }
 
-    const q = await db()
-      .collection("tastings")
-      .where("publicSlug", "==", slug)
-      .limit(1)
-      .get();
-
-    if (q.empty) {
-      return NextResponse.json(
-        { ok: false, error: "Tasting not found" },
-        { status: 404 }
-      );
+    // 🔁 Session optional per try/catch (weil es kein requireSessionOptional gibt)
+    let existingSession: any = null;
+    try {
+      existingSession = requireSession();
+    } catch {
+      existingSession = null;
     }
 
-    const tastingDoc = q.docs[0];
-    const tasting = tastingDoc.data() as any;
-
-    if (!tasting?.pinHash) {
-      return NextResponse.json(
-        { ok: false, error: "Tasting PIN not configured" },
-        { status: 500 }
-      );
-    }
-
-    if (!verifyPin(pin, tasting.pinHash)) {
-      return NextResponse.json(
-        { ok: false, error: "Invalid PIN" },
-        { status: 403 }
-      );
-    }
-
-    // 🔁 Wenn Session schon existiert → kein neuer Nutzer
-    const existingSession = requireSessionOptional();
+    // Wenn schon eingeloggt → KEINEN neuen Participant erzeugen
     if (existingSession?.participantId) {
       return NextResponse.json({
         ok: true,
@@ -78,12 +49,35 @@ export async function POST(req: Request) {
       });
     }
 
+    // Tasting finden
+    const q = await db()
+      .collection("tastings")
+      .where("publicSlug", "==", slug)
+      .limit(1)
+      .get();
+
+    if (q.empty) {
+      return NextResponse.json({ ok: false, error: "Tasting not found" }, { status: 404 });
+    }
+
+    const tastingDoc = q.docs[0];
+    const tasting = tastingDoc.data() as any;
+
+    if (!tasting?.pinHash) {
+      return NextResponse.json({ ok: false, error: "Tasting PIN not configured" }, { status: 500 });
+    }
+
+    if (!verifyPin(pin, tasting.pinHash)) {
+      return NextResponse.json({ ok: false, error: "Invalid PIN" }, { status: 403 });
+    }
+
     // ➕ neuen Participant anlegen
     const participantRef = tastingDoc.ref.collection("participants").doc();
     await participantRef.set({
       name,
       nameNorm: name.toLowerCase(),
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      isActive: true,
     });
 
     const res = NextResponse.json({
@@ -98,9 +92,6 @@ export async function POST(req: Request) {
 
     return res;
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message ?? "Join failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: e?.message ?? "Join failed" }, { status: 500 });
   }
 }
