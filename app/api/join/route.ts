@@ -87,7 +87,6 @@ export async function POST(req: Request) {
 
     setSessionCookie(res, {
       participantId: participantRef.id,
-      slug,
     });
 
     return res;
